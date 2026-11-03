@@ -1,247 +1,251 @@
-# AI 自动送货单识别生成表格
+# AI Delivery Note to Spreadsheet
 
-**AI Delivery Note to Spreadsheet**
+**AI 自动送货单识别生成表格**
 
-> 拍摄手写送货单 → AI 自动识别明细 → 一键导出电子税务局「发票开具项目信息导入」模板。
+> Photograph a handwritten delivery note → let AI extract every line item → export a ready-to-import invoice template in one click.
 >
-> 纯前端单文件应用，零安装、零后端，图片和密钥都不离开你的浏览器。
+> A pure front-end, single-file app. No install, no backend. Your images and API key never leave your browser.
 
 <p>
-<img alt="单文件" src="https://img.shields.io/badge/部署-单文件静态页-blue">
-<img alt="无需后端" src="https://img.shields.io/badge/后端-无需-orange">
-<img alt="模型" src="https://img.shields.io/badge/识别-Gemini%20Vision-4285F4">
-<img alt="导出" src="https://img.shields.io/badge/导出-xlsx%20%7C%20csv-green">
+<img alt="Single file" src="https://img.shields.io/badge/deploy-single%20static%20file-blue">
+<img alt="No backend" src="https://img.shields.io/badge/backend-none-orange">
+<img alt="Model" src="https://img.shields.io/badge/vision-Gemini%20API-4285F4">
+<img alt="Export" src="https://img.shields.io/badge/export-xlsx%20%7C%20csv-green">
 </p>
 
-**[▶ 在线使用](https://bobb1103.github.io/ai-delivery-note-to-spreadsheet/)** ｜ [功能特性](#功能特性) ｜ [工作原理](#工作原理) ｜ [常见问题](#常见问题)
+**[▶ Live demo](https://bobb1103.github.io/ai-delivery-note-to-spreadsheet/)** ｜ [Features](#features) ｜ [How it works](#how-it-works) ｜ [FAQ](#faq)
+
+> **Language note.** The app UI and every file it generates are in **Simplified Chinese**, because the whole point is to feed China's e-tax portal, which validates Chinese sheet names and headers on import. This README is in English.
 
 ---
 
-## 目录
+## Table of contents
 
-- [为什么做这个](#为什么做这个)
-- [功能特性](#功能特性)
-- [快速开始](#快速开始)
-- [获取 Gemini API Key](#获取-gemini-api-key)
-- [使用流程](#使用流程)
-- [工作原理](#工作原理)
-- [项目结构](#项目结构)
-- [数据结构](#数据结构)
-- [导出文件说明](#导出文件说明)
-- [隐私与安全](#隐私与安全)
-- [常见问题](#常见问题)
-- [已知限制](#已知限制)
-- [后续规划](#后续规划)
-- [技术栈](#技术栈)
+- [Why this exists](#why-this-exists)
+- [Features](#features)
+- [Quick start](#quick-start)
+- [Getting a Gemini API key](#getting-a-gemini-api-key)
+- [How to use](#how-to-use)
+- [How it works](#how-it-works)
+- [Project structure](#project-structure)
+- [Data model](#data-model)
+- [Export files](#export-files)
+- [Privacy and security](#privacy-and-security)
+- [FAQ](#faq)
+- [Known limitations](#known-limitations)
+- [Roadmap](#roadmap)
+- [Tech stack](#tech-stack)
 
 ---
 
-## 为什么做这个
+## Why this exists
 
-仓库里原本只有一份手写送货单（同一品类、同一格式），每月要把几十张单据录进电子税务局，逐条抄「规格 / 单位 / 数量 / 单价」既慢又容易错。
+The only thing in this repo used to be one scanned handwritten delivery note — same product, same format, month after month. Dozens of them had to be keyed into the e-tax portal by hand, copying specification, unit, quantity and unit price line by line. Slow, and easy to get wrong.
 
-于是做了这个小工具：拍照上传，AI 把明细读成结构化数据，直接生成税局导入模板，剩下的人工只做**核对**而不必**录入**。
+So this tool does the transcribing: upload the photos, let the model turn them into structured rows, generate the import template. The human is left to **verify**, not to **type**.
 
-它的目标很窄——把一件重复劳动从 40 分钟压到 3 分钟，所以刻意选择了最轻的形态：**一个 HTML 文件，双击即用，不上传服务器**。
+The goal is deliberately narrow — compress a 40-minute chore into 3 minutes — which is why it takes the lightest possible shape: **one HTML file, double-click to run, nothing uploaded to a server**.
 
-## 功能特性
+## Features
 
-| 能力 | 说明 |
+| Capability | Details |
 | --- | --- |
-| 📷 批量识别 | 一次选多张照片，逐张处理，单张失败不影响其余 |
-| 🔍 模型自动探测 | 启动时查询当前 Key 可用的模型列表，自动挑选可用端点，避免写死模型名导致的 `404` |
-| 🗜️ 上传前压缩 | 长边压到 1600px、JPEG 质量 0.85，兼顾识别率与上传速度 |
-| 🧮 金额自动计算 | 金额 = 数量 × 单价，保留两位小数；单价存疑的条目在表格中标红提示复核 |
-| 🔀 自动排序 | 汇总结果按送货单号升序排列，便于与纸质单据对账 |
-| 📊 双格式导出 | 税局标准四 Sheet 导入模板（`.xlsx`）＋ 通用明细表（`.csv`，含 BOM，Excel 直开不乱码） |
-| 🔑 密钥本地保存 | API Key 存于 `localStorage`，可随时一键清除 |
-| 📱 响应式 | Tailwind 布局，手机拍照后可直接处理 |
+| 📷 Batch recognition | Select many photos at once; each is processed independently, so one bad image doesn't sink the batch |
+| 🔍 Model auto-discovery | On first use it queries which models your key can actually access and picks a working endpoint — no hard-coded model name, no `404` when a version is retired |
+| 🗜️ Compress before upload | Long edge capped at 1600px, JPEG quality 0.85 — a balance between legibility and upload size |
+| 🧮 Amounts computed for you | Amount = quantity × unit price, two decimals. Rows with an uncertain price are highlighted in red for review |
+| 🔀 Auto-sorted | Results sorted by delivery note number, ascending, to make paper-to-screen reconciliation easy |
+| 📊 Two export formats | The official four-sheet import template (`.xlsx`) plus a plain detail sheet (`.csv`, with BOM so Excel opens it without mojibake) |
+| 🔑 Key stays local | The API key lives in `localStorage` and can be wiped with one click |
+| 📱 Responsive | Tailwind layout; shoot on your phone and process it right there |
 
-## 快速开始
+## Quick start
 
-**方式一：在线使用（无需下载）**
+**Option 1: Use it online (nothing to download)**
 
 👉 **<https://bobb1103.github.io/ai-delivery-note-to-spreadsheet/>**
 
-手机、电脑浏览器均可直接打开，配合手机拍照最顺手。
+Works in any mobile or desktop browser. Best experience: take the photo with your phone.
 
-**方式二：直接打开本地文件**
+**Option 2: Open the file locally**
 
-下载 `index.html`，双击用浏览器打开即可。
+Download `index.html` and double-click it.
 
-**方式三：本地起静态服务**（个别浏览器对本地文件的限制较多时使用）
+**Option 3: Serve it locally** (when a browser restricts `file://` pages)
 
 ```bash
 python -m http.server 8000
-# 浏览器访问 http://localhost:8000
+# then open http://localhost:8000
 ```
 
-**方式四：自行部署**
+**Option 4: Deploy your own**
 
-Fork 仓库后，`Settings` → `Pages` → Source 选择 `main` 分支根目录，即可获得自己的站点地址。也可直接放在任何静态托管（Vercel、Netlify、OSS/COS 等）上，无需构建。
+Fork the repo, then `Settings` → `Pages` → source `main` branch, root folder. Or drop the file on any static host (Vercel, Netlify, S3/COS…). There is no build step.
 
-> 首次打开会要求填写 API Key，填一次即可，之后自动进入主界面。
+> The first visit asks for an API key. Enter it once; afterwards you land straight on the main screen.
 
-## 获取 Gemini API Key
+## Getting a Gemini API key
 
-1. 打开 [Google AI Studio](https://aistudio.google.com/apikey)
-2. 登录 Google 账号，点击 **Create API key**
-3. 复制生成的 Key（形如 `AIza...`），粘贴到页面的密钥输入框，点击「保存密钥并开始使用」
+1. Open [Google AI Studio](https://aistudio.google.com/apikey)
+2. Sign in with a Google account and click **Create API key**
+3. Copy the key (looks like `AIza...`), paste it into the key field, and click **Save key and start**
 
-> Key 只是保存在你的浏览器里，页面会直接向 Google 官方接口发起请求。免费额度通常足够日常小批量使用，具体以 Google 官方政策为准。
+> The key is only stored in your browser, and the page calls Google's API directly. The free tier is usually enough for small daily batches; check Google's current terms for limits.
 
-## 使用流程
+## How to use
 
-1. **上传** — 选择一张或多张手写送货单照片（支持 `image/*`，可多选）
-2. **设置税率** — 右上角选择发票默认税率：`13%` / `3%` / `1%` / `免税 0%`
-3. **识别** — 点击「开始极速识别并转化」，页面显示逐张进度；完成后出现汇总表格
-4. **导出** — 「导出税务发票模板」生成税局导入文件，或「导出常规 CSV」留档
+1. **Upload** — pick one or more photos of handwritten delivery notes (`image/*`, multi-select supported)
+2. **Set the tax rate** — top right: `13%` / `3%` / `1%` / `Exempt (0)`
+3. **Recognize** — click **Start recognition**; per-image progress is shown, then the summary table appears
+4. **Export** — **Export invoice template** for the tax-portal file, or **Export plain CSV** for your own records
 
-## 工作原理
+## How it works
 
 ```mermaid
 flowchart LR
-    A[上传送货单照片<br/>可多张] --> B[Canvas 压缩<br/>长边≤1600px JPEG0.85]
-    B --> C[转 Base64]
-    C --> D{探测可用模型}
-    D -->|GET /v1beta/models| E[Gemini generateContent<br/>JSON 模式]
-    E --> F[字段归一化<br/>规格符号修正]
-    F --> G[按单号升序汇总]
-    G --> H[表格预览<br/>存疑单价标红]
-    H --> I[导出税局 xlsx]
-    H --> J[导出 CSV]
+    A[Upload delivery note photos<br/>multiple allowed] --> B[Canvas compress<br/>long edge <=1600px, JPEG 0.85]
+    B --> C[Base64 encode]
+    C --> D{Discover a usable model}
+    D -->|GET /v1beta/models| E[Gemini generateContent<br/>JSON mode]
+    E --> F[Normalize fields<br/>fix spec separators]
+    F --> G[Sort by note number]
+    G --> H[Table preview<br/>uncertain prices in red]
+    H --> I[Export tax .xlsx]
+    H --> J[Export .csv]
 ```
 
-几个关键设计：
+Four design decisions worth knowing:
 
-- **不写死模型名**：先请求 `/v1beta/models`，筛出支持 `generateContent` 的模型，排除已下线条目，优先选 `flash` 系列。端点解析后缓存，失败即清空缓存以便下次重新探测。这解决了「模型版本下线 → 全站 404」的典型故障。
-- **强约束输出**：请求体带 `responseMimeType: application/json` 并用 `systemInstruction` 规定字段结构，保证返回可直接 `JSON.parse`；同时做了容错解析（数组 / `items` / `details` / 单对象都能接）。
-- **规格文本规范化**：提示词要求乘号统一为 `*`；对含「防水袋」的品名额外做一次修正——把连写的 6 位数字按两位一组插入乘号（`303650` → `30*36*50`），因为手写单上这类规格最容易漏掉乘号。
-- **税局模板对齐**：`1-明细模板` 表头严格复刻官方模板的三行结构（填表说明 / 字段限制 / 字段名），并补齐 `excelVersion`、`xzqhdm`、`2-特定业务信息` 三张校验用 Sheet。
+- **No hard-coded model name.** It first calls `/v1beta/models`, keeps the ones supporting `generateContent`, filters out retired families, and prefers a `flash` model. The resolved endpoint is cached, and the cache is cleared on any failure so the next run re-detects. This is what prevents the classic "model version gets retired → the whole app 404s" failure.
+- **Constrained output.** Requests set `responseMimeType: application/json` and use `systemInstruction` to pin the field structure, so the response parses directly. The parser is also forgiving: it accepts a bare array, `items`, `details`, or a single object.
+- **Spec text normalization.** The prompt requires `*` as the multiplication sign. For item names containing 防水袋 (waterproof bag) it applies one extra fix — a run of six written-together digits gets separators inserted in pairs (`303650` → `30*36*50`), because that spec is the one most often missing its `*` on handwritten notes.
+- **Aligned with the official template.** The `1-明细模板` sheet reproduces the official three-row header structure exactly (instructions row / field limits row / field names row), and the workbook also carries the `excelVersion`, `xzqhdm` and `2-特定业务信息` sheets the portal expects for validation.
 
-## 项目结构
+## Project structure
 
 ```
 .
-├── index.html    # 全部内容：页面结构 + 样式 + 业务逻辑
+├── index.html    # everything: markup + styles + application logic
 └── README.md
 ```
 
-单文件形态是刻意的取舍：不需要 `npm install`、不需要构建，把文件丢到任何静态托管上就能用。代价是后续功能变复杂时需要拆分。
+The single-file shape is a deliberate trade-off: no `npm install`, no build, drop it on any static host and it works. The cost is that it will need splitting once the feature set grows.
 
-| 代码区块 | 位置 | 职责 |
+| Code block | Location | Responsibility |
 | --- | --- | --- |
-| `appState` | 脚本开头 | 全局状态：密钥、文件队列、识别结果、模型端点缓存 |
-| `initKeySystem` / `showKeySetup` / `showMainContent` | 密钥模块 | 密钥存在性判断与界面切换 |
-| `compressAndConvertToBase64` | 图像模块 | 读取、缩放、转 JPEG、输出 Base64 |
-| `discoverWorkingEndpoint` | 模型模块 | 模型清单探测与端点缓存 |
-| `callGeminiAPI` | 识别模块 | 构造请求、解析 JSON、字段归一化 |
-| `renderTable` | 渲染模块 | 生成结果表格 HTML |
-| `downloadTaxExcel` / `downloadCSV` | 导出模块 | 四 Sheet 模板与 CSV 生成 |
+| `appState` | top of script | Global state: key, file queue, extracted items, cached model endpoint |
+| `initKeySystem` / `showKeySetup` / `showMainContent` | key module | Check whether a key exists and switch views |
+| `compressAndConvertToBase64` | image module | Read, resize, re-encode as JPEG, output Base64 |
+| `discoverWorkingEndpoint` | model module | Probe the model list and cache the endpoint |
+| `callGeminiAPI` | recognition module | Build the request, parse JSON, normalize fields |
+| `renderTable` | render module | Build the results table HTML |
+| `downloadTaxExcel` / `downloadCSV` | export module | Generate the four-sheet workbook and the CSV |
 
-## 数据结构
+## Data model
 
-识别结果统一为下列结构（`appState.extractedItems`）：
+Every recognised row shares this shape (`appState.extractedItems`):
 
-| 字段 | 类型 | 说明 |
+| Field | Type | Meaning |
 | --- | --- | --- |
-| `deliveryNo` | `string` | 送货单号，用于分组与排序 |
-| `nameAndSpec` | `string` | 名称及规格，如 `FPP 双印 26.5*37+5+2.5` |
-| `unit` | `string` | 单位，缺省 `只` |
-| `quantity` | `number` | 数量 |
-| `unitPrice` | `number` | 单价 |
-| `isPriceCertain` | `boolean` | 单价是否确认清晰；`false` 时表格中单价标红，提示人工复核 |
+| `deliveryNo` | `string` | Delivery note number; used for grouping and sorting |
+| `nameAndSpec` | `string` | Item name and specification, e.g. `FPP 双印 26.5*37+5+2.5` |
+| `unit` | `string` | Unit of measure; defaults to `只` |
+| `quantity` | `number` | Quantity |
+| `unitPrice` | `number` | Unit price |
+| `isPriceCertain` | `boolean` | Whether the price was read confidently; `false` renders it in red so you review that row |
 
-## 导出文件说明
+## Export files
 
-### 税局导入模板 `发票开具项目信息导入.xlsx`
+### Tax portal import template — `发票开具项目信息导入.xlsx`
 
-| Sheet | 内容 |
+| Sheet | Contents |
 | --- | --- |
-| `1-明细模板` | 主体数据：项目名称、规格型号、单位、数量、单价、金额、税率、优惠政策类型 |
-| `excelVersion` | 模板版本校验位（`mx;20250501`），税局系统据此识别模板版本 |
-| `xzqhdm` | 行政区划校验表 |
-| `2-特定业务信息` | 不动产等特定业务字段（本工具场景留空，仅为通过校验保留结构） |
+| `1-明细模板` | The payload: item name, specification, unit, quantity, unit price, amount, tax rate, tax preference type |
+| `excelVersion` | Template version marker (`mx;20250501`); the portal uses it to identify the template version |
+| `xzqhdm` | Administrative division validation sheet |
+| `2-特定业务信息` | Special-business fields such as real estate; left blank here, kept only so validation passes |
 
-> 政策口径：税率选「免税」时，`优惠政策类型` 自动填 `免税`。
+> Rule: when the tax rate is set to **Exempt**, the tax preference type is filled in as `免税` (exempt).
 
-### 通用明细 `送货单汇总数据.csv`
+> ⚠️ **Keep these labels in Chinese.** Sheet names, header rows and the file name are validated by the e-tax portal. Translating them produces a file that opens fine but cannot be imported.
 
-列：送货单号 / 项目名称 / 规格型号 / 单位 / 数量 / 单价 / 金额。带 UTF-8 BOM，Excel 双击打开不乱码。
+### Plain detail sheet — `送货单汇总数据.csv`
 
-## 隐私与安全
+Columns: delivery no. / item name / specification / unit / quantity / unit price / amount. UTF-8 with BOM, so Excel opens it cleanly on double-click.
 
-- **图片不出浏览器生态**：图像压缩在前端完成，仅以 Base64 随请求体发往 Google Gemini 官方接口，不经过任何第三方中转服务。
-- **密钥仅存本地**：写入 `localStorage` 的 `GEMINI_API_KEY`，可随时点「重置/更换 API 密钥」清除。
-- **注意事项**：`localStorage` 是明文存储，且前端直连意味着 Key 出现在浏览器请求中。请**不要在共用电脑上长期保留密钥**，用完即清；若需多人使用，建议改为自建后端代理转发。
-- 仓库为「自用」性质，导入税务局前请**务必人工复核**识别结果。
+## Privacy and security
 
-## 常见问题
+- **Images stay out of any middleman.** Compression happens in the browser; the image is sent as Base64 directly to Google's Gemini endpoint. No third-party relay is involved.
+- **The key is local only.** Written to `localStorage` under `GEMINI_API_KEY`, removable at any time via **Reset / change API key**.
+- **Caveats.** `localStorage` is plaintext, and a front-end-only design means the key is visible in browser requests. Don't leave a key on a shared machine — clear it when you're done. For multi-user deployments, put a small backend proxy in front instead.
+- This is a personal-use tool. **Always verify** the recognised data against the paper originals before filing anything with the tax authority.
+
+## FAQ
 
 <details>
-<summary><b>提示 404 / 模型不存在？</b></summary>
+<summary><b>I get a 404 / "model not found".</b></summary>
 
-旧版本曾把模型名写死在代码里，模型下线后必然 404。当前版本改为运行时探测可用模型，正常情况下不会再出现。若仍失败，先确认 Key 有效、账号所在地区支持 Gemini API，再检查控制台报错信息。
+Earlier versions hard-coded the model name, so a retirement meant a guaranteed 404. The current version discovers available models at runtime, so this should no longer happen. If it does: confirm the key is valid, confirm Gemini API is available in your account's region, then read the console error for the exact response.
 </details>
 
 <details>
-<summary><b>识别结果为空或明显错乱？</b></summary>
+<summary><b>Nothing is recognised, or the output is clearly wrong.</b></summary>
 
-依次排查：照片是否清晰、单据是否倾斜或过曝、单张照片内是否混排了多张单据。手写体连笔、涂改较多的单据建议重拍。可以在提示词里补充你单据的固定版式特征来提升命中率。
+Check in this order: is the photo sharp, is the sheet skewed or overexposed, are multiple notes crammed into one frame. Rewrite notes with heavy cursive or corrections. You can also add your form's fixed layout hints to the prompt to improve hit rate.
 </details>
 
 <details>
-<summary><b>数量/单价读错怎么办？</b></summary>
+<summary><b>Quantity or unit price came out wrong. What now?</b></summary>
 
-当前表格为只读展示，识别结果需在导出的 Excel 里修正后再导入税局。带 `isPriceCertain: false` 的条目是模型自己标记的「不确定」，优先核对这些行。
+The on-screen table is read-only, so fix values in the exported Excel before importing. Rows with `isPriceCertain: false` are the ones the model itself flagged as uncertain — review those first.
 </details>
 
 <details>
-<summary><b>为什么项目名称永远是「胶袋」？</b></summary>
+<summary><b>Why is the item name always 胶袋 (plastic bag)?</b></summary>
 
-这是为单一业务场景写死的常量（`renderTable` 与两个导出函数中都有）。换品类需要改代码，见 [已知限制](#已知限制)。
+It's a constant hard-coded for one specific business line (it appears in `renderTable` and in both export functions). Supporting another product means changing the code — see [Known limitations](#known-limitations).
 </details>
 
 <details>
-<summary><b>断网能用吗？</b></summary>
+<summary><b>Does it work offline?</b></summary>
 
-不能。页面依赖 CDN 加载 Tailwind、SheetJS 与字体，识别依赖在线模型接口。如需离线，可把这三个依赖下载到本地并改为相对路径。
+No. The page loads Tailwind, SheetJS and a webfont from CDNs, and recognition needs the online model endpoint. To go offline, vendor those three dependencies locally and switch to relative paths.
 </details>
 
-## 已知限制
+## Known limitations
 
-诚实列出当前实现的边界，便于判断是否适合你的场景：
+Stated plainly, so you can judge whether it fits your case:
 
-- **品类写死**：项目名称固定为 `胶袋`，默认单位 `只`，属于单一业务定制，非通用工具
-- **结果不可编辑**：识别后无法在页面上改数，只能导出后在 Excel 里调
-- **串行处理**：多图逐张请求，图多时耗时线性增长，未做并发
-- **排序假设**：按 `parseInt(单号)` 升序，非纯数字单号会被当作 0 排在最前
-- **模板版本绑定**：`excelVersion` 固定为 `mx;20250501`，税局模板升级后需同步修改
-- **字符集与地区**：仅面向中文手写单据与国内发票场景
+- **Single product, hard-coded.** Item name is fixed to `胶袋` and the default unit to `只`. This is a bespoke tool, not a general-purpose one.
+- **Results aren't editable.** You can't correct a number on the page; you fix it in Excel after export.
+- **Sequential processing.** Images are sent one at a time, so time grows linearly with batch size. No concurrency.
+- **Sorting assumes numeric IDs.** Rows sort by `parseInt(deliveryNo)`, so non-numeric note numbers collapse to 0 and land at the top.
+- **Pinned template version.** `excelVersion` is fixed at `mx;20250501`; it needs updating when the official template changes.
+- **Language and region.** Built for Chinese handwritten notes and mainland invoicing only. The UI is in Simplified Chinese.
 
-## 后续规划
+## Roadmap
 
-- [ ] 表格单元格可编辑，导出前直接改数
-- [ ] 项目名称 / 单位改为界面可配置，去掉硬编码
-- [ ] 多图并发识别 + 失败自动重试
-- [ ] 识别结果本地暂存，刷新不丢
-- [ ] 依赖本地化 + PWA，支持离线打开
-- [ ] 单据模板自适应（不同版式的字段定位）
+- [ ] Editable table cells, so values can be fixed before export
+- [ ] Configurable item name and unit, removing the hard-coded values
+- [ ] Concurrent recognition with automatic retry
+- [ ] Persist results locally across refreshes
+- [ ] Vendor dependencies + PWA for offline use
+- [ ] Adapt to different note layouts (field localization per template)
 
-## 技术栈
+## Tech stack
 
-- **界面**：原生 HTML/CSS + Tailwind CSS（CDN）
-- **表格读写**：[SheetJS](https://sheetjs.com/) `xlsx@0.18.5`
-- **识别**：Google Gemini Vision API（`v1beta/generateContent`，JSON 模式）
-- **图像处理**：Canvas API（`drawImage` + `toDataURL`）
-- **构建**：无。一个文件即全部。
+- **UI**: plain HTML/CSS + Tailwind CSS (CDN)
+- **Spreadsheet I/O**: [SheetJS](https://sheetjs.com/) `xlsx@0.18.5`
+- **Recognition**: Google Gemini API (`v1beta/generateContent`, JSON mode)
+- **Image processing**: Canvas API (`drawImage` + `toDataURL`)
+- **Build**: none. One file is the whole thing.
 
 ---
 
-## 免责声明
+## Disclaimer
 
-本工具仅为个人效率辅助，识别结果可能存在误差。**任何用于税务申报的数据，请以纸质原始单据为准并人工复核**；因直接采用识别结果造成的申报差错，由使用者自行承担。
+This tool is a personal productivity aid, and recognition can be wrong. **Any figure filed with a tax authority must be checked against the original paper document.** Errors arising from using the output as-is are the user's own responsibility.
 
 ## License
 
-仓库未声明开源许可证。如需他人复用，建议补充 [MIT](https://choosealicense.com/licenses/mit/) 等许可证文件。
+No license is declared. If you want others to reuse this, consider adding [MIT](https://choosealicense.com/licenses/mit/).
