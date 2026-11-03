@@ -1,4 +1,6 @@
-# 手写送货单电子化助手
+# AI 自动送货单识别生成表格
+
+**AI Delivery Note to Spreadsheet**
 
 > 拍摄手写送货单 → AI 自动识别明细 → 一键导出电子税务局「发票开具项目信息导入」模板。
 >
@@ -11,7 +13,7 @@
 <img alt="导出" src="https://img.shields.io/badge/导出-xlsx%20%7C%20csv-green">
 </p>
 
-**[▶ 在线使用](https://bobb1103.github.io/-/)** ｜ [功能特性](#功能特性) ｜ [工作原理](#工作原理) ｜ [常见问题](#常见问题)
+**[▶ 在线使用](https://bobb1103.github.io/ai-delivery-note-to-spreadsheet/)** ｜ [功能特性](#功能特性) ｜ [工作原理](#工作原理) ｜ [常见问题](#常见问题)
 
 ---
 
@@ -59,7 +61,7 @@
 
 **方式一：在线使用（无需下载）**
 
-👉 **<https://bobb1103.github.io/-/>**
+👉 **<https://bobb1103.github.io/ai-delivery-note-to-spreadsheet/>**
 
 手机、电脑浏览器均可直接打开，配合手机拍照最顺手。
 
