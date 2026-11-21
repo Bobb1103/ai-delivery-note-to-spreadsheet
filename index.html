@@ -358,3 +358,230 @@
                         var name = (m.name || "").replace("models/", "");
                         var isBad = false;
                         for (var k = 0; k < badKw.length; k++) {
+                            if (name.indexOf(badKw[k]) !== -1) { isBad = true; break; }
+                        }
+                        if (methods.indexOf("generateContent") !== -1 && name.indexOf("gemini-") === 0 && !isBad) {
+                            pool.push(name);
+                        }
+                    }
+                }
+            } catch (e) {}
+
+            pool.sort(function(a, b) {
+                return (a.indexOf('flash') !== -1 ? 1 : 2) - (b.indexOf('flash') !== -1 ? 1 : 2);
+            });
+
+            var fallbacks = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.6-pro"];
+            for (var f = 0; f < fallbacks.length; f++) {
+                if (pool.indexOf(fallbacks[f]) === -1) pool.push(fallbacks[f]);
+            }
+            appState.modelPool = pool;
+            return pool;
+        }
+
+        async function callGeminiAPI(base64Data, mimeType, modelIndex, retryCount) {
+            modelIndex = modelIndex || 0;
+            retryCount = retryCount || 0;
+            var models = await getModelPool();
+            if (modelIndex >= models.length) {
+                throw new Error("当前 Google 所有模型节点均在高负载排队 (503)，请稍等 10 秒再试。");
+            }
+            var modelName = models[modelIndex];
+            var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + modelName + ':generateContent?key=' + appState.apiKey;
+
+            var promptText = '你是送货单识别助手。请提取图片中的送货单号以及每行货物的“纯尺寸规格”、“单位”、“数量”、“单价”。\n' +
+                '规则：\n' +
+                '1. 规格型号：【绝对不要包含PE、PPE、OPP、FPP、双印、防水袋等材质或工艺文字】，只提取尺寸数字，乘号统一用 *（例如 26.5*37+5+2.5）。\n' +
+                '2. 不提取货号，不提取手写金额。\n' +
+                '3. 直接返回纯JSON，格式：{"deliveryNo":"5118928","items":[{"nameAndSpec":"26.5*37+5+2.5","unit":"只","quantity":8400,"unitPrice":0.27,"isPriceCertain":true}]}';
+
+            var payload = {
+                contents: [{
+                    role: "user",
+                    parts: [
+                        { text: promptText },
+                        { inlineData: { mimeType: mimeType || 'image/jpeg', data: base64Data } }
+                    ]
+                }]
+            };
+
+            var res = await fetch(url, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                var st = res.status;
+                if (st === 503 || st === 429 || st === 500) {
+                    if (retryCount < 1) {
+                        el('loadingMessage').textContent = '节点 (' + modelName + ') 繁忙 (' + st + ')，自动重连中...';
+                        await sleep(1500);
+                        return callGeminiAPI(base64Data, mimeType, modelIndex, retryCount + 1);
+                    } else if (modelIndex + 1 < models.length) {
+                        el('loadingMessage').textContent = '主节点拥堵，自动分流至备用节点 (' + models[modelIndex + 1] + ')...';
+                        await sleep(500);
+                        return callGeminiAPI(base64Data, mimeType, modelIndex + 1, 0);
+                    }
+                }
+                if ((st === 404 || st === 400) && modelIndex + 1 < models.length) {
+                    return callGeminiAPI(base64Data, mimeType, modelIndex + 1, 0);
+                }
+                var errText = await res.text();
+                throw new Error('HTTP ' + st + ' (' + errText + ')');
+            }
+
+            var data = await res.json();
+            var rawText = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0].text;
+            if (!rawText) throw new Error("模型未返回文本");
+
+            // 安全剥离反引号（不使用字面量反引号防粘贴解析出错）
+            var tick3 = String.fromCharCode(96, 96, 96);
+            var cleanJson = rawText.split(tick3 + 'json').join('').split(tick3 + 'JSON').join('').split(tick3).join('').trim();
+            var parsed = JSON.parse(cleanJson);
+
+            var dNo = parsed.deliveryNo || parsed.orderNo || "";
+            var list = Array.isArray(parsed) ? parsed : (parsed.items || parsed.details || []);
+            var resultItems = [];
+
+            for (var i = 0; i < list.length; i++) {
+                var it = list[i];
+                var spec = cleanSpecString(it.nameAndSpec || it.spec || "");
+                if (spec) {
+                    resultItems.push({
+                        deliveryNo: it.deliveryNo || dNo,
+                        nameAndSpec: spec,
+                        unit: it.unit || "只",
+                        quantity: Number(it.quantity) || 0,
+                        unitPrice: Number(it.unitPrice) || 0,
+                        isPriceCertain: it.isPriceCertain !== false
+                    });
+                }
+            }
+            return resultItems;
+        }
+
+        window.startProcess = async function() {
+            if (appState.isProcessing || appState.files.length === 0) return;
+            appState.isProcessing = true;
+            appState.extractedItems = [];
+            el('processButton').disabled = true;
+            el('clearImageButton').disabled = true;
+            el('resultsSection').classList.add('hidden');
+            el('loadingIndicator').classList.remove('hidden');
+            el('messageBox').classList.add('hidden');
+
+            var total = appState.files.length;
+            var errors = [];
+
+            for (var i = 0; i < total; i++) {
+                var file = appState.files[i];
+                el('loadingMessage').textContent = '正在识别第 ' + (i + 1) + ' / ' + total + ' 张图片 (' + file.name + ')...';
+                try {
+                    var imgData = await compressImage(file);
+                    var items = await callGeminiAPI(imgData.base64Data, imgData.mimeType, 0, 0);
+                    if (items.length > 0) {
+                        for (var k = 0; k < items.length; k++) appState.extractedItems.push(items[k]);
+                    } else {
+                        errors.push('第 ' + (i + 1) + ' 张未提取到条目');
+                    }
+                } catch (err) {
+                    errors.push('第 ' + (i + 1) + ' 张出错: ' + err.message);
+                }
+                if (i < total - 1) await sleep(800);
+            }
+
+            appState.extractedItems.sort(function(a, b) {
+                return (parseInt(a.deliveryNo, 10) || 0) - (parseInt(b.deliveryNo, 10) || 0);
+            });
+
+            el('loadingIndicator').classList.add('hidden');
+            appState.isProcessing = false;
+            el('processButton').disabled = false;
+            el('clearImageButton').disabled = false;
+
+            if (appState.extractedItems.length > 0) {
+                renderTable(appState.extractedItems);
+                el('resultsSection').classList.remove('hidden');
+                if (errors.length > 0) {
+                    showMessage('部分完成，提取 ' + appState.extractedItems.length + ' 条。异常：' + errors.join('；'), 'info');
+                } else {
+                    showMessage('全部识别完成！共汇总 ' + appState.extractedItems.length + ' 条明细。', 'success');
+                }
+            } else {
+                showMessage('识别失败：' + errors.join('；'), 'error');
+            }
+        };
+
+        window.exportTaxExcel = function() {
+            if (typeof XLSX === 'undefined') {
+                alert('Excel 导出库加载未完成，请检查网络后刷新重试。');
+                return;
+            }
+            var taxRate = el('taxRateSelect').value;
+            var items = appState.extractedItems;
+            if (!items || items.length === 0) return;
+
+            var wb = XLSX.utils.book_new();
+            var sheetData = [
+                ["填表说明：\n1、项目名称：无需写商品和服务税收分类简称（*号以及中间内容）。\n2、导入前请在电子税务局【开票业务】-【开票信息维护】中对开具的项目信息进行维护，或在导入模板中填写“商品与服务税收分类编码”。\n3、数量、单价可任填其中一项，或者仅填金额；如果三项均填写，导入后系统将默认以填写的数量*单价=金额进行误差校验；\n商品单价、商品数量：小数点后最多保留13位小数；\n金额：小数点后最多保留2位小数。"],
+                ["必填\n(限100字符)", "非必填\n(限19字符)", "非必填\n(限40字符)", "非必填\n(限20字符)", "非必填\n(限16字符)", "非必填\n(限16字符)\t", "必填\n(限18字符)\n(保留两位小数)", "必填\n(以小数后两位形式填写，如“0.13”代\n表税率13%)", "非必填\n(限18字符)\n保留两位小数", "非必填\n（限15字符)", "非必填\n（限15字符)   "],
+                ["项目名称", "商品和服务税收分类编码", "规格型号", "单位", "商品数量", "商品单价", "金额", "税率", "折扣金额", "优惠政策类型", "煤炭种类"]
+            ];
+
+            for (var i = 0; i < items.length; i++) {
+                var it = items[i];
+                var q = Number(it.quantity) || 0;
+                var p = Number(it.unitPrice) || 0;
+                var amt = Number((q * p).toFixed(2));
+                sheetData.push(["胶袋", "", it.nameAndSpec || "", it.unit || "只", q, p, amt, taxRate, "", taxRate === "0" ? "免税" : "", ""]);
+            }
+
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), "1-明细模板");
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([[""], [""], [""], ["mx;20250501"]]), "excelVersion");
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([["北京市怀柔区"], ["北京市平谷区"], ["北京市昌平区"], ["北京市大兴区"]]), "xzqhdm");
+            XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet([
+                ["不动产销售说明", null, null, null, null, null, null, null, null, "不动产租赁说明"],
+                ["非必填\n（限40字符)", "必填\n合计（限120字符)", null, "非必填\n（限28字符)", "非必填\n（限20字符)", "非必填\n（限20字符)\t", "必填\n\t（限20字符)", "必填(是/否)\n\t（限2字符)", "必填\n\t（限12字符)", "必填\n（限40字符)\t"],
+                ["产权证书/不动产权证号码", "不动产地址", "不动产详细地址", "不动产单元代码/网签合同备案编码", "土地增值税项目编号", "核定计税价格", "实际成交含税金额", "跨地市标志", "面积单位", "产权证书/不动产权证号码"]
+            ]), "2-特定业务信息");
+
+            XLSX.writeFile(wb, "发票开具项目信息导入.xlsx");
+            showMessage('发票导入模板 Excel 已下载。', 'success');
+        };
+
+        window.exportCsv = function() {
+            var items = appState.extractedItems;
+            var csv = "送货单号,项目名称,规格型号,单位,数量,单价,金额\n";
+            for (var i = 0; i < items.length; i++) {
+                var it = items[i];
+                var q = Number(it.quantity) || 0;
+                var p = Number(it.unitPrice) || 0;
+                csv += '"' + (it.deliveryNo || '-') + '","胶袋","' + (it.nameAndSpec || '-') + '",' + (it.unit || '只') + ',' + q + ',' + p + ',' + (q * p).toFixed(2) + '\n';
+            }
+            var blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
+            var a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = '送货单汇总数据.csv';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+        };
+
+        // 初始化页面状态并点亮绿色“脚本就绪”标签
+        (function init() {
+            var badge = el('jsStatusBadge');
+            if (badge) {
+                badge.textContent = '✅ 脚本就绪';
+                badge.className = 'absolute right-0 top-0 text-xs px-2 py-1 rounded bg-green-100 text-green-700 font-medium';
+            }
+            var saved = localStorage.getItem('GEMINI_API_KEY');
+            if (saved && saved.trim().length >= 15) {
+                appState.apiKey = saved.trim();
+                el('apiKeySection').classList.add('hidden');
+                el('mainContent').classList.remove('hidden');
+            }
+        })();
+    </script>
+</body>
+</html>
