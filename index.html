@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>手写送货单电子化工具</title>
     
-    <!-- Tailwind CSS -->
+    <!-- Tailwind CSS (界面样式库) -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- SheetJS -->
+    <!-- SheetJS (Excel 原版模板读写库) -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         body {
@@ -31,7 +31,7 @@
         <header class="text-center mb-8 relative">
             <span id="jsStatusBadge" class="absolute right-0 top-0 text-xs px-2 py-1 rounded bg-red-100 text-red-600">⏳ 脚本加载中</span>
             <h1 class="text-3xl font-extrabold text-indigo-700 border-b-2 border-indigo-100 pb-3 mb-2">手写送货单电子化助手</h1>
-            <p class="text-gray-600">自动提取纯尺寸规格、在线微调核对、一键导出税务局标准导入模板。</p>
+            <p class="text-gray-600">优先调度高速空闲节点、防涂改干扰解析、支持品名/尺寸微调及税局模板导出。</p>
         </header>
 
         <!-- API Key 设置区 -->
@@ -107,7 +107,7 @@
             <!-- 步骤 3: 结果与导出 -->
             <section id="resultsSection" class="hidden">
                 <div class="flex justify-between items-center mb-4 border-b pb-2">
-                    <h2 class="text-xl font-semibold text-gray-800">📦 汇总识别结果表格 (点击单元格可直接修改)</h2>
+                    <h2 class="text-xl font-semibold text-gray-800">📦 汇总识别结果表格 (点击单元格可直接修改品名/尺寸/单价)</h2>
                 </div>
                 
                 <div id="tableOutput" class="overflow-x-auto mb-4 border border-gray-200 rounded-lg shadow-md"></div>
@@ -133,6 +133,7 @@
     </div>
 
     <script>
+        // 全局状态存储
         var appState = {
             apiKey: "",
             files: [],
@@ -141,16 +142,19 @@
             modelPool: []
         };
 
+        // 获取 DOM 元素简写
         function el(id) {
             return document.getElementById(id);
         }
 
+        // 异步延时函数
         function sleep(ms) {
             return new Promise(function(resolve) {
                 setTimeout(resolve, ms);
             });
         }
 
+        // 顶部状态提示条
         function showMessage(message, type) {
             var box = el('messageBox');
             box.textContent = message;
@@ -164,6 +168,7 @@
             }
         }
 
+        // 密钥显隐切换
         window.toggleKey = function() {
             var inp = el('apiKeyInput');
             var btn = el('toggleKeyVisible');
@@ -176,6 +181,7 @@
             }
         };
 
+        // 保存本地 API Key
         window.saveApiKey = function() {
             var inp = el('apiKeyInput');
             var raw = inp.value || "";
@@ -192,6 +198,7 @@
             }
         };
 
+        // 重置本地 API Key
         window.resetApiKey = function() {
             if (confirm('确定要清除本地保存的 API 密钥吗？')) {
                 localStorage.removeItem('GEMINI_API_KEY');
@@ -204,6 +211,7 @@
             }
         };
 
+        // 清空全部已选图片和结果
         window.resetAll = function() {
             appState.files = [];
             appState.extractedItems = [];
@@ -218,6 +226,7 @@
             el('messageBox').classList.add('hidden');
         };
 
+        // 监听文件选择并生成预览
         window.onFilesSelected = function(input) {
             appState.files = Array.prototype.slice.call(input.files || []);
             el('messageBox').classList.add('hidden');
@@ -236,7 +245,7 @@
             }
         };
 
-        // 清洗规格：去除材质及工艺名称（如 PE、FPP、双印），只留纯数字尺寸
+        // 清洗规格：去除材质及工艺前缀（如 PE、FPP、双印、新制电雕版），仅保留纯数字尺寸
         function cleanSpecString(spec) {
             if (!spec) return "";
             var s = String(spec).trim();
@@ -255,9 +264,10 @@
             return s;
         }
 
+        // 前端高压缩比缩放（长边 1280px，画质 0.80），大幅降低网络传输耗时与 503 拥堵率
         function compressImage(file) {
-            var maxDim = 1600;
-            var quality = 0.85;
+            var maxDim = 1280;
+            var quality = 0.80;
             return new Promise(function(resolve) {
                 var reader = new FileReader();
                 reader.onload = function(e) {
@@ -299,6 +309,7 @@
             });
         }
 
+        // 单元格实时编辑更新并重算金额
         window.updateCell = function(idx, field, val) {
             if (field === 'quantity' || field === 'unitPrice') {
                 appState.extractedItems[idx][field] = Number(val) || 0;
@@ -309,6 +320,7 @@
             }
         };
 
+        // 渲染汇总表格（支持直接修改开票品名、单号、规格、数量、单价）
         function renderTable(items) {
             var html = '<table class="min-w-full divide-y divide-gray-200">' +
                 '<thead class="bg-indigo-100"><tr>' +
@@ -328,10 +340,12 @@
                 var amt = (q * p).toFixed(2);
                 var rowBg = i % 2 === 0 ? 'bg-white' : 'bg-gray-50';
                 var pBorder = item.isPriceCertain === false ? 'border-red-400 bg-red-50 text-red-700 font-bold' : 'border-transparent hover:border-gray-300';
+                var itemName = item.itemName || '胶袋';
+                var nameHighlight = itemName !== '胶袋' ? 'text-amber-700 bg-amber-50 border-amber-300 font-bold' : 'text-gray-800 border-transparent hover:border-gray-300 font-semibold';
 
                 html += '<tr class="' + rowBg + ' hover:bg-indigo-50">' +
                     '<td class="px-3 py-2 text-sm"><input type="text" oninput="window.updateCell(' + i + ',\'deliveryNo\',this.value)" value="' + (item.deliveryNo || '') + '" class="w-24 bg-transparent border border-transparent hover:border-gray-300 rounded px-1 text-blue-600 font-medium" /></td>' +
-                    '<td class="px-3 py-2 text-sm font-semibold text-gray-800">胶袋</td>' +
+                    '<td class="px-3 py-2 text-sm"><input type="text" oninput="window.updateCell(' + i + ',\'itemName\',this.value)" value="' + itemName + '" class="w-24 bg-transparent border ' + nameHighlight + ' rounded px-1" /></td>' +
                     '<td class="px-3 py-2 text-sm"><input type="text" oninput="window.updateCell(' + i + ',\'nameAndSpec\',this.value)" value="' + (item.nameAndSpec || '') + '" class="w-36 bg-transparent border border-transparent hover:border-gray-300 rounded px-1 text-gray-700" /></td>' +
                     '<td class="px-3 py-2 text-sm"><input type="text" oninput="window.updateCell(' + i + ',\'unit\',this.value)" value="' + (item.unit || '只') + '" class="w-12 bg-transparent border border-transparent hover:border-gray-300 rounded px-1 text-gray-600" /></td>' +
                     '<td class="px-3 py-2 text-sm text-right"><input type="number" step="any" oninput="window.updateCell(' + i + ',\'quantity\',this.value)" value="' + q + '" class="w-20 text-right bg-transparent border border-transparent hover:border-gray-300 rounded px-1 text-gray-700" /></td>' +
@@ -343,6 +357,7 @@
             el('tableOutput').innerHTML = html;
         }
 
+        // 获取模型池：优先将空闲高速的 lite 节点排在第一位，彻底规避标准 flash 高峰期 503 拥堵
         async function getModelPool() {
             if (appState.modelPool.length > 0) return appState.modelPool;
             var pool = [];
@@ -367,11 +382,17 @@
                 }
             } catch (e) {}
 
+            // 优先级排序：lite (最高速、独立空闲队列) -> flash -> pro
             pool.sort(function(a, b) {
-                return (a.indexOf('flash') !== -1 ? 1 : 2) - (b.indexOf('flash') !== -1 ? 1 : 2);
+                function getRank(n) {
+                    if (n.indexOf('lite') !== -1) return 1;
+                    if (n.indexOf('flash') !== -1) return 2;
+                    return 3;
+                }
+                return getRank(a) - getRank(b);
             });
 
-            var fallbacks = ["gemini-3.6-flash", "gemini-3.5-flash-lite", "gemini-3.6-pro"];
+            var fallbacks = ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.6-pro"];
             for (var f = 0; f < fallbacks.length; f++) {
                 if (pool.indexOf(fallbacks[f]) === -1) pool.push(fallbacks[f]);
             }
@@ -379,6 +400,19 @@
             return pool;
         }
 
+        // 强化版 JSON 提取器：自动定位首尾大括号，防止模型前后夹带说明文字导致解析失败
+        function extractJsonSafely(text) {
+            var tick3 = String.fromCharCode(96, 96, 96);
+            var clean = text.split(tick3 + 'json').join('').split(tick3 + 'JSON').join('').split(tick3).join('').trim();
+            var start = clean.indexOf('{');
+            var end = clean.lastIndexOf('}');
+            if (start !== -1 && end !== -1 && end > start) {
+                clean = clean.substring(start, end + 1);
+            }
+            return JSON.parse(clean);
+        }
+
+        // 调用 AI 提取单张送货单（防涂改干扰 + 识别制版费 + 503 自动分流）
         async function callGeminiAPI(base64Data, mimeType, modelIndex, retryCount) {
             modelIndex = modelIndex || 0;
             retryCount = retryCount || 0;
@@ -389,11 +423,13 @@
             var modelName = models[modelIndex];
             var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + modelName + ':generateContent?key=' + appState.apiKey;
 
-            var promptText = '你是送货单识别助手。请提取图片中的送货单号以及每行货物的“纯尺寸规格”、“单位”、“数量”、“单价”。\n' +
-                '规则：\n' +
-                '1. 规格型号：【绝对不要包含PE、PPE、OPP、FPP、双印、防水袋等材质或工艺文字】，只提取尺寸数字，乘号统一用 *（例如 26.5*37+5+2.5）。\n' +
-                '2. 不提取货号，不提取手写金额。\n' +
-                '3. 直接返回纯JSON，格式：{"deliveryNo":"5118928","items":[{"nameAndSpec":"26.5*37+5+2.5","unit":"只","quantity":8400,"unitPrice":0.27,"isPriceCertain":true}]}';
+            var promptText = '你是专业的送货单数据提取助手。请提取图片中的送货单号以及每行货物的“开票品名”、“纯尺寸规格”、“单位”、“数量”、“单价”。\n' +
+                '严格遵守以下规则：\n' +
+                '1. 开票品名：默认统一填 "胶袋"；但如果单据上明确写着“新制电雕版”、“电雕版”或“版费”，则 itemName 填 "电雕版"。\n' +
+                '2. 规格型号：【绝对不要包含PE、PPE、OPP、FPP、双印、防水袋、新制电雕版等材质或工艺名称】，只提取纯尺寸数字，乘号统一用 *（例如 26.5*37+5+2.5 或 720*520）。\n' +
+                '3. 涂改数字处理：如果单价或数量栏有被涂黑、划掉的旧数字，请完全忽略涂改部分，只提取旁边清晰的有效数字；不要把“包装件数”栏里的金额当成数量。\n' +
+                '4. 不提取货号，不提取手写金额。\n' +
+                '5. 仅输出纯JSON，格式：{"deliveryNo":"5118929","items":[{"itemName":"胶袋","nameAndSpec":"34*38+5+2.5","unit":"只","quantity":1050,"unitPrice":0.34,"isPriceCertain":true}]}';
 
             var payload = {
                 contents: [{
@@ -402,7 +438,10 @@
                         { text: promptText },
                         { inlineData: { mimeType: mimeType || 'image/jpeg', data: base64Data } }
                     ]
-                }]
+                }],
+                generationConfig: {
+                    temperature: 0.1
+                }
             };
 
             var res = await fetch(url, {
@@ -416,11 +455,11 @@
                 if (st === 503 || st === 429 || st === 500) {
                     if (retryCount < 1) {
                         el('loadingMessage').textContent = '节点 (' + modelName + ') 繁忙 (' + st + ')，自动重连中...';
-                        await sleep(1500);
+                        await sleep(1200);
                         return callGeminiAPI(base64Data, mimeType, modelIndex, retryCount + 1);
                     } else if (modelIndex + 1 < models.length) {
-                        el('loadingMessage').textContent = '主节点拥堵，自动分流至备用节点 (' + models[modelIndex + 1] + ')...';
-                        await sleep(500);
+                        el('loadingMessage').textContent = '当前节点拥堵，已自动分流至备用节点 (' + models[modelIndex + 1] + ')...';
+                        await sleep(400);
                         return callGeminiAPI(base64Data, mimeType, modelIndex + 1, 0);
                     }
                 }
@@ -435,11 +474,7 @@
             var rawText = data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0].text;
             if (!rawText) throw new Error("模型未返回文本");
 
-            // 安全剥离反引号（不使用字面量反引号防粘贴解析出错）
-            var tick3 = String.fromCharCode(96, 96, 96);
-            var cleanJson = rawText.split(tick3 + 'json').join('').split(tick3 + 'JSON').join('').split(tick3).join('').trim();
-            var parsed = JSON.parse(cleanJson);
-
+            var parsed = extractJsonSafely(rawText);
             var dNo = parsed.deliveryNo || parsed.orderNo || "";
             var list = Array.isArray(parsed) ? parsed : (parsed.items || parsed.details || []);
             var resultItems = [];
@@ -450,6 +485,7 @@
                 if (spec) {
                     resultItems.push({
                         deliveryNo: it.deliveryNo || dNo,
+                        itemName: it.itemName || "胶袋",
                         nameAndSpec: spec,
                         unit: it.unit || "只",
                         quantity: Number(it.quantity) || 0,
@@ -461,6 +497,7 @@
             return resultItems;
         }
 
+        // 批量处理所有照片
         window.startProcess = async function() {
             if (appState.isProcessing || appState.files.length === 0) return;
             appState.isProcessing = true;
@@ -488,9 +525,10 @@
                 } catch (err) {
                     errors.push('第 ' + (i + 1) + ' 张出错: ' + err.message);
                 }
-                if (i < total - 1) await sleep(800);
+                if (i < total - 1) await sleep(600);
             }
 
+            // 按送货单号升序排序
             appState.extractedItems.sort(function(a, b) {
                 return (parseInt(a.deliveryNo, 10) || 0) - (parseInt(b.deliveryNo, 10) || 0);
             });
@@ -513,6 +551,7 @@
             }
         };
 
+        // 导出税务局官方标准 4 Sheet 模板 Excel
         window.exportTaxExcel = function() {
             if (typeof XLSX === 'undefined') {
                 alert('Excel 导出库加载未完成，请检查网络后刷新重试。');
@@ -534,7 +573,7 @@
                 var q = Number(it.quantity) || 0;
                 var p = Number(it.unitPrice) || 0;
                 var amt = Number((q * p).toFixed(2));
-                sheetData.push(["胶袋", "", it.nameAndSpec || "", it.unit || "只", q, p, amt, taxRate, "", taxRate === "0" ? "免税" : "", ""]);
+                sheetData.push([it.itemName || "胶袋", "", it.nameAndSpec || "", it.unit || "只", q, p, amt, taxRate, "", taxRate === "0" ? "免税" : "", ""]);
             }
 
             XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(sheetData), "1-明细模板");
@@ -550,6 +589,7 @@
             showMessage('发票导入模板 Excel 已下载。', 'success');
         };
 
+        // 导出常规 CSV
         window.exportCsv = function() {
             var items = appState.extractedItems;
             var csv = "送货单号,项目名称,规格型号,单位,数量,单价,金额\n";
@@ -557,7 +597,7 @@
                 var it = items[i];
                 var q = Number(it.quantity) || 0;
                 var p = Number(it.unitPrice) || 0;
-                csv += '"' + (it.deliveryNo || '-') + '","胶袋","' + (it.nameAndSpec || '-') + '",' + (it.unit || '只') + ',' + q + ',' + p + ',' + (q * p).toFixed(2) + '\n';
+                csv += '"' + (it.deliveryNo || '-') + '","' + (it.itemName || '胶袋') + '","' + (it.nameAndSpec || '-') + '",' + (it.unit || '只') + ',' + q + ',' + p + ',' + (q * p).toFixed(2) + '\n';
             }
             var blob = new Blob(["\ufeff" + csv], { type: 'text/csv;charset=utf-8;' });
             var a = document.createElement('a');
@@ -568,7 +608,7 @@
             document.body.removeChild(a);
         };
 
-        // 初始化页面状态并点亮绿色“脚本就绪”标签
+        // 页面初始化
         (function init() {
             var badge = el('jsStatusBadge');
             if (badge) {
