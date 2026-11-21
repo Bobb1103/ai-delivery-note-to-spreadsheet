@@ -5,14 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>手写送货单电子化工具</title>
     
-    <!-- Tailwind CSS -->
+    <!-- Tailwind CSS (界面样式库) -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- SheetJS -->
+    <!-- SheetJS (Excel 原版模板读写库) -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
         body {
-            font-family: 'Inter', 'Microsoft YaHei', sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Microsoft YaHei", sans-serif;
             background-color: #f7f9fb;
             min-height: 100vh;
             display: flex;
@@ -31,13 +30,16 @@
     <div id="app" class="w-full max-w-4xl bg-white shadow-2xl rounded-xl p-6 md:p-10 border border-gray-100">
         <header class="text-center mb-8">
             <h1 class="text-3xl font-extrabold text-indigo-700 border-b-2 border-indigo-100 pb-3 mb-2">手写送货单电子化助手</h1>
-            <p class="text-gray-600">支持 503 跨模型智能分流、纯尺寸提取、表格在线微调及税局模板导出。</p>
+            <p class="text-gray-600">自动提取纯尺寸规格、在线微调核对、一键导出税务局标准导入模板。</p>
         </header>
+
+        <!-- 全局脚本错误提示区（防止静默白屏） -->
+        <div id="fatalErrorBox" class="mb-6 p-4 bg-red-100 border border-red-400 text-red-800 rounded-lg text-sm hidden"></div>
 
         <!-- API Key 设置区 -->
         <section id="apiKeySection" class="mb-8 p-6 bg-yellow-50 border border-yellow-300 rounded-lg shadow-inner hidden">
             <h2 class="text-xl font-semibold text-yellow-800 mb-4">🔑 设置 API 密钥</h2>
-            <p class="text-sm text-yellow-700 mb-4">为了保护您的账户安全，密钥将存储在您的本地浏览器中，不会上传到服务器。</p>
+            <p class="text-sm text-yellow-700 mb-4">密钥仅保存在您的本地浏览器中，不会上传到任何第三方服务器。</p>
             <div class="flex flex-col gap-3">
                 <div class="relative">
                     <input type="password" id="apiKeyInput" placeholder="请粘贴您的 Gemini API Key" 
@@ -46,7 +48,7 @@
                         👁️
                     </button>
                 </div>
-                <button id="saveKeyButton" class="w-full py-2 bg-yellow-600 text-white font-bold rounded-lg hover:bg-yellow-700 transition duration-150">
+                <button type="button" id="saveKeyButton" class="w-full py-2 bg-yellow-600 text-white font-bold rounded-lg hover:bg-yellow-700 transition duration-150">
                     保存密钥并开始使用
                 </button>
             </div>
@@ -65,7 +67,7 @@
                         <option value="0">免税/0% (0)</option>
                     </select>
                 </div>
-                <button id="resetKeyButton" class="text-xs text-gray-400 hover:text-indigo-600 underline transition duration-150">
+                <button type="button" id="resetKeyButton" class="text-xs text-gray-400 hover:text-indigo-600 underline transition duration-150">
                     重置/更换 API 密钥
                 </button>
             </div>
@@ -82,7 +84,7 @@
                         file:bg-indigo-200 file:text-indigo-800
                         hover:file:bg-indigo-300 transition duration-150"
                     />
-                    <button id="clearImageButton"
+                    <button type="button" id="clearImageButton"
                             class="px-4 py-2 bg-red-500 text-white font-medium rounded-lg text-sm hover:bg-red-600 transition duration-150 disabled:opacity-50"
                             disabled>
                         🗑️ 清除所有图片
@@ -92,14 +94,14 @@
 
             <!-- 步骤 2: 处理与指示 -->
             <section class="mb-8">
-                <button id="processButton"
+                <button type="button" id="processButton"
                         class="w-full py-3 bg-indigo-600 text-white font-bold rounded-lg shadow-lg hover:bg-indigo-700 transition duration-150 disabled:opacity-50"
                         disabled>
                     开始极速识别并转化
                 </button>
                 <div id="loadingIndicator" class="mt-4 p-3 text-center rounded-lg bg-indigo-50 border border-indigo-200 hidden">
                     <div class="animate-spin inline-block w-5 h-5 border-2 border-indigo-500 border-t-transparent rounded-full"></div>
-                    <span id="loadingMessage" class="ml-3 text-indigo-600 font-medium">正在读取图片 1 / 0，请稍候...</span>
+                    <span id="loadingMessage" class="ml-3 text-indigo-600 font-medium">正在读取图片，请稍候...</span>
                 </div>
                 <div id="messageBox" class="mt-4 p-3 rounded-lg text-sm font-medium hidden"></div>
             </section>
@@ -107,19 +109,19 @@
             <!-- 步骤 3: 结果与导出 -->
             <section id="resultsSection" class="hidden">
                 <div class="flex justify-between items-center mb-4 border-b pb-2">
-                    <h2 class="text-xl font-semibold text-gray-800">📦 汇总识别结果表格 (点击单元格可直接微调)</h2>
+                    <h2 class="text-xl font-semibold text-gray-800">📦 汇总识别结果表格 (点击单元格可直接修改)</h2>
                 </div>
                 
                 <div id="tableOutput" class="overflow-x-auto mb-4 border border-gray-200 rounded-lg shadow-md">
-                    <!-- 表格内容 -->
+                    <!-- 表格动态生成 -->
                 </div>
 
                 <div class="flex flex-col sm:flex-row gap-3">
-                    <button id="exportExcelButton"
+                    <button type="button" id="exportExcelButton"
                             class="flex-1 py-3 bg-green-600 text-white font-bold rounded-lg hover:bg-green-700 transition duration-150 shadow-md">
                         📊 导出税务发票模板 (发票开具项目信息导入.xlsx)
                     </button>
-                    <button id="exportCsvButton"
+                    <button type="button" id="exportCsvButton"
                             class="py-3 px-6 bg-gray-600 text-white font-medium rounded-lg hover:bg-gray-700 transition duration-150">
                         ⬇️ 导出常规 CSV
                     </button>
@@ -134,8 +136,19 @@
         </div>
     </div>
 
-    <script type="module">
-        const appState = {
+    <script>
+        // 全局异常监听：确保任何脚本异常都能直接显示在界面上
+        window.onerror = function(msg, url, lineNo) {
+            var box = document.getElementById('fatalErrorBox');
+            if (box) {
+                box.textContent = "页面脚本运行异常 (第 " + lineNo + " 行): " + msg;
+                box.classList.remove('hidden');
+            }
+            return false;
+        };
+
+        // 应用全局状态管理
+        var appState = {
             apiKey: "",
             files: [],
             extractedItems: [],
@@ -143,8 +156,8 @@
             modelPool: []
         };
 
-        const D = {
-            app: document.getElementById('app'),
+        // 集中获取页面 DOM 元素
+        var D = {
             apiKeySection: document.getElementById('apiKeySection'),
             apiKeyInput: document.getElementById('apiKeyInput'),
             toggleKeyVisible: document.getElementById('toggleKeyVisible'),
@@ -152,7 +165,6 @@
             resetKeyButton: document.getElementById('resetKeyButton'),
             mainContent: document.getElementById('mainContent'),
             taxRateSelect: document.getElementById('taxRateSelect'),
-            
             imageInput: document.getElementById('imageInput'),
             clearImageButton: document.getElementById('clearImageButton'),
             processButton: document.getElementById('processButton'),
@@ -164,13 +176,19 @@
             messageBox: document.getElementById('messageBox'),
             resultsSection: document.getElementById('resultsSection'),
             imagePreview: document.getElementById('imagePreview'),
-            previewSection: document.getElementById('previewSection'),
+            previewSection: document.getElementById('previewSection')
         };
 
-        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+        // 延时辅助函数
+        function sleep(ms) {
+            return new Promise(function(resolve) {
+                setTimeout(resolve, ms);
+            });
+        }
 
+        // 初始化本地密钥检测
         function initKeySystem() {
-            const storedKey = localStorage.getItem('GEMINI_API_KEY');
+            var storedKey = localStorage.getItem('GEMINI_API_KEY');
             if (storedKey && storedKey.trim().length > 10) {
                 appState.apiKey = storedKey.trim();
                 showMainContent();
@@ -189,41 +207,8 @@
             D.mainContent.classList.remove('hidden');
         }
 
-        D.toggleKeyVisible.addEventListener('click', () => {
-            if (D.apiKeyInput.type === 'password') {
-                D.apiKeyInput.type = 'text';
-                D.toggleKeyVisible.textContent = '🔒';
-            } else {
-                D.apiKeyInput.type = 'password';
-                D.toggleKeyVisible.textContent = '👁️';
-            }
-        });
-
-        D.saveKeyButton.addEventListener('click', () => {
-            const inputKey = D.apiKeyInput.value.replace(/\s+/g, '').trim();
-            if (inputKey && inputKey.length >= 15) {
-                localStorage.setItem('GEMINI_API_KEY', inputKey);
-                appState.apiKey = inputKey;
-                appState.modelPool = [];
-                showMainContent();
-                showMessage('密钥已保存到本地浏览器。', 'success');
-            } else {
-                alert('请输入有效的 API Key（密钥长度过短，请检查是否完整复制）');
-            }
-        });
-
-        D.resetKeyButton.addEventListener('click', () => {
-            if (confirm('确定要清除本地保存的 API 密钥吗？清除后需要重新输入。')) {
-                localStorage.removeItem('GEMINI_API_KEY');
-                appState.apiKey = "";
-                appState.modelPool = [];
-                D.apiKeyInput.value = "";
-                resetApp();
-                showKeySetup();
-            }
-        });
-
-        function showMessage(message, type = 'info') {
+        // 显示状态提示信息
+        function showMessage(message, type) {
             D.messageBox.textContent = message;
             D.messageBox.classList.remove('hidden', 'bg-red-100', 'text-red-700', 'bg-green-100', 'text-green-700', 'bg-blue-100', 'text-blue-700');
 
@@ -237,6 +222,7 @@
             D.messageBox.classList.remove('hidden');
         }
 
+        // 重置页面状态
         function resetApp() {
             appState.files = [];
             appState.extractedItems = [];
@@ -252,34 +238,46 @@
             
             D.tableOutput.innerHTML = '';
             D.messageBox.classList.add('hidden');
-            if (appState.apiKey) showMessage('请选择一张或多张送货单图片开始处理。', 'info');
+            if (appState.apiKey) {
+                showMessage('请选择一张或多张送货单图片开始处理。', 'info');
+            }
         }
 
+        // 清洗规格：去除材质及工艺名称（如 PE、FPP、双印等），仅保留纯数字尺寸
         function cleanSpecString(spec) {
             if (!spec) return "";
-            let s = String(spec).trim();
-            s = s.replace(/^[^\d.]+/g, '').trim();
+            var s = String(spec).trim();
+            // 定位到第一个数字（0-9）出现的位置并截取后续纯尺寸
+            var firstDigitIndex = s.search(/[0-9]/);
+            if (firstDigitIndex > 0) {
+                s = s.substring(firstDigitIndex).trim();
+            }
+            // 将各种乘号统一替换为半角星号 *
             s = s.replace(/[xX×]/g, '*');
-            return s || String(spec).trim();
+            return s;
         }
 
-        function compressAndConvertToBase64(file, maxDimension = 1600, quality = 0.85) {
-            return new Promise((resolve) => {
-                const reader = new FileReader();
-                reader.onload = (e) => {
-                    const rawResult = e.target.result;
-                    const fallback = () => {
-                        const parts = rawResult.split(',');
+        // 前端图片等比缩放与压缩（解决手机原图体积过大导致超时问题）
+        function compressAndConvertToBase64(file) {
+            var maxDimension = 1600;
+            var quality = 0.85;
+            return new Promise(function(resolve) {
+                var reader = new FileReader();
+                reader.onload = function(e) {
+                    var rawResult = e.target.result;
+                    var fallback = function() {
+                        var parts = rawResult.split(',');
                         resolve({
                             base64Data: parts[1],
                             mimeType: file.type || 'image/jpeg'
                         });
                     };
 
-                    const img = new Image();
-                    img.onload = () => {
+                    var img = new Image();
+                    img.onload = function() {
                         try {
-                            let { width, height } = img;
+                            var width = img.width;
+                            var height = img.height;
                             if (width > maxDimension || height > maxDimension) {
                                 if (width > height) {
                                     height = Math.round((height * maxDimension) / width);
@@ -290,13 +288,13 @@
                                 }
                             }
 
-                            const canvas = document.createElement('canvas');
+                            var canvas = document.createElement('canvas');
                             canvas.width = width;
                             canvas.height = height;
-                            const ctx = canvas.getContext('2d');
+                            var ctx = canvas.getContext('2d');
                             ctx.drawImage(img, 0, 0, width, height);
 
-                            const dataUrl = canvas.toDataURL('image/jpeg', quality);
+                            var dataUrl = canvas.toDataURL('image/jpeg', quality);
                             resolve({
                                 base64Data: dataUrl.split(',')[1],
                                 mimeType: 'image/jpeg'
@@ -308,54 +306,21 @@
                     img.onerror = fallback;
                     img.src = rawResult;
                 };
-                reader.onerror = () => {
+                reader.onerror = function() {
                     resolve({ base64Data: '', mimeType: 'image/jpeg' });
                 };
                 reader.readAsDataURL(file);
             });
         }
 
-        // 支持在线直接微调的汇总表格
+        // 渲染可直接在页面微调数据的汇总表格
         function renderTable(items) {
             if (!items || items.length === 0) {
                 D.tableOutput.innerHTML = '<p class="text-center text-gray-500 p-4">未提取到任何有效数据。</p>';
                 return;
             }
 
-            let html = `
-                <table class="min-w-full divide-y divide-gray-200">
-                    <thead class="bg-indigo-100">
-                        <tr>
-                            <th class="px-3 py-3 text-left text-xs font-semibold text-indigo-700 uppercase">送货单号</th>
-                            <th class="px-3 py-3 text-left text-xs font-semibold text-indigo-700 uppercase">开票品名</th>
-                            <th class="px-3 py-3 text-left text-xs font-semibold text-indigo-700 uppercase">规格型号</th>
-                            <th class="px-3 py-3 text-left text-xs font-semibold text-indigo-700 uppercase">单位</th>
-                            <th class="px-3 py-3 text-right text-xs font-semibold text-indigo-700 uppercase">数量</th>
-                            <th class="px-3 py-3 text-right text-xs font-semibold text-indigo-700 uppercase">单价</th>
-                            <th class="px-3 py-3 text-right text-xs font-semibold text-indigo-700 uppercase">金额(自动核算)</th>
-                        </tr>
-                    </thead>
-                    <tbody class="bg-white divide-y divide-gray-200">
-            `;
-
-            items.forEach((item, index) => {
-                const quantity = Number(item.quantity) || 0;
-                const unitPrice = Number(item.unitPrice) || 0;
-                const totalAmount = (quantity * unitPrice).toFixed(2);
-                const rowClass = index % 2 === 0 ? 'bg-white' : 'bg-gray-50';
-                const priceBorder = item.isPriceCertain === false ? 'border-red-400 bg-red-50 text-red-700 font-bold' : 'border-transparent hover:border-gray-300';
-
-                html += `
-                    <tr class="${rowClass} hover:bg-indigo-50 transition duration-150">
-                        <td class="px-3 py-2 whitespace-nowrap text-sm font-medium text-blue-600">
-                            <input type="text" data-idx="${index}" data-field="deliveryNo" value="${item.deliveryNo || ''}" 
-                                class="edit-cell w-24 bg-transparent border border-transparent hover:border-gray-300 rounded px-1 py-0.5 text-blue-600 font-medium" />
-                        </td>
-                        <td class="px-3 py-2 whitespace-nowrap text-sm font-semibold text-gray-800">胶袋</td>
-                        <td class="px-3 py-2 whitespace-nowrap text-sm font-medium text-gray-700">
-                            <input type="text" data-idx="${index}" data-field="nameAndSpec" value="${item.nameAndSpec || ''}" 
-                                class="edit-cell w-36 bg-transparent border border-transparent hover:border-gray-300 rounded px-1 py-0.5 text-gray-700" />
-                        </td>
-                        <td class="px-3 py-2 whitespace-nowrap text-sm text-gray-600">
-                            <input type="text" data-idx="${index}" data-field="unit" value="${item.unit || '只'}" 
-                                class="edit-cell w-12
+            var html = '<table class="min-w-full divide-y divide-gray-200">' +
+                '<thead class="bg-indigo-100">' +
+                '<tr>' +
+                '<th class="px-3 py-3 text-left text-xs font-semibold text-indigo-700 uppercase">送货单号
