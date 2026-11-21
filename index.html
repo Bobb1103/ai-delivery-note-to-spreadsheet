@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>手写送货单电子化工具</title>
     
-    <!-- Tailwind CSS (界面样式库) -->
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- SheetJS (Excel 原版模板读写库) -->
+    <!-- SheetJS -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -31,7 +31,7 @@
     <div id="app" class="w-full max-w-4xl bg-white shadow-2xl rounded-xl p-6 md:p-10 border border-gray-100">
         <header class="text-center mb-8">
             <h1 class="text-3xl font-extrabold text-indigo-700 border-b-2 border-indigo-100 pb-3 mb-2">手写送货单电子化助手</h1>
-            <p class="text-gray-600">已开启全自动模型探测机制（免受 404 影响），支持一键导出税局标准导入模板。</p>
+            <p class="text-gray-600">自动过滤材质前缀（仅留纯尺寸）、支持 503 断线重连与税局标准模板导出。</p>
         </header>
 
         <!-- API Key 设置区 -->
@@ -138,7 +138,7 @@
             files: [],
             extractedItems: [],
             isProcessing: false,
-            cachedModelUrl: "" // 自动匹配到的可用模型端点
+            modelPool: [] // 有效模型候选池
         };
 
         const D = {
@@ -164,6 +164,8 @@
             imagePreview: document.getElementById('imagePreview'),
             previewSection: document.getElementById('previewSection'),
         };
+
+        const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
         function initKeySystem() {
             const storedKey = localStorage.getItem('GEMINI_API_KEY');
@@ -200,7 +202,7 @@
             if (inputKey && inputKey.length >= 15) {
                 localStorage.setItem('GEMINI_API_KEY', inputKey);
                 appState.apiKey = inputKey;
-                appState.cachedModelUrl = "";
+                appState.modelPool = [];
                 showMainContent();
                 showMessage('密钥已保存到本地浏览器。', 'success');
             } else {
@@ -212,7 +214,7 @@
             if (confirm('确定要清除本地保存的 API 密钥吗？清除后需要重新输入。')) {
                 localStorage.removeItem('GEMINI_API_KEY');
                 appState.apiKey = "";
-                appState.cachedModelUrl = "";
+                appState.modelPool = [];
                 D.apiKeyInput.value = "";
                 resetApp();
                 showKeySetup();
@@ -249,6 +251,17 @@
             D.tableOutput.innerHTML = '';
             D.messageBox.classList.add('hidden');
             if (appState.apiKey) showMessage('请选择一张或多张送货单图片开始处理。', 'info');
+        }
+
+        // 清洗规格：剔除 PE, PPE, FPP, OPP, 双印, 防水袋 等材质与工艺字符，仅留纯尺寸
+        function cleanSpecString(spec) {
+            if (!spec) return "";
+            let s = String(spec).trim();
+            // 移除开头非数字字符（材质英文代号及中文工艺名称）
+            s = s.replace(/^[^\d.]+/g, '').trim();
+            // 统一乘号为 *
+            s = s.replace(/[xX×]/g, '*');
+            return s || String(spec).trim();
         }
 
         function compressAndConvertToBase64(file, maxDimension = 1600, quality = 0.85) {
@@ -329,7 +342,11 @@
                 const quantity = Number(item.quantity) || 0;
                 const unitPrice = Number(item.unitPrice) || 0;
                 const totalAmount = (quantity * unitPrice).toFixed(2);
-                const priceDisplay = `¥${unitPrice.toFixed(2)}`;
+                // 单价保留原始精度（至少2位，多则保留原始小数位数，避免 0.275 被显示成 0.28）
+                const priceStr = unitPrice.toString().includes('.') && unitPrice.toString().split('.')[1].length > 2
+                    ? unitPrice.toString()
+                    : unitPrice.toFixed(2);
+                const priceDisplay = `¥${priceStr}`;
                 
                 let priceClass = "text-gray-700";
                 let rowClass = index % 2 === 0 ? 'bg-white' : 'bg-gray-50';
@@ -355,7 +372,6 @@
             D.tableOutput.innerHTML = html;
         }
 
-        // 导出符合税务局官方原版四 Sheet 架构的 Excel 导入文件
         function downloadTaxExcel() {
             const taxRate = D.taxRateSelect.value;
             const items = appState.extractedItems;
@@ -363,7 +379,6 @@
 
             const wb = XLSX.utils.book_new();
 
-            // 1. 主表：1-明细模板
             const sheetData = [
                 [
                     "填表说明：\n1、项目名称：无需写商品和服务税收分类简称（*号以及中间内容）。\n2、导入前请在电子税务局【开票业务】-【开票信息维护】中对开具的项目信息进行维护，或在导入模板中填写“商品与服务税收分类编码”。\n3、数量、单价可任填其中一项，或者仅填金额；如果三项均填写，导入后系统将默认以填写的数量*单价=金额进行误差校验；\n商品单价、商品数量：小数点后最多保留13位小数；\n金额：小数点后最多保留2位小数。"
@@ -400,15 +415,12 @@
             const ws1 = XLSX.utils.aoa_to_sheet(sheetData);
             XLSX.utils.book_append_sheet(wb, ws1, "1-明细模板");
 
-            // 2. 校验表：excelVersion (税局导入强制版本标识)
             const wsVersion = XLSX.utils.aoa_to_sheet([[""], [""], [""], ["mx;20250501"]]);
             XLSX.utils.book_append_sheet(wb, wsVersion, "excelVersion");
 
-            // 3. 行政区划表：xzqhdm
             const wsXz = XLSX.utils.aoa_to_sheet([["北京市怀柔区"], ["北京市平谷区"], ["北京市昌平区"], ["北京市大兴区"]]);
             XLSX.utils.book_append_sheet(wb, wsXz, "xzqhdm");
 
-            // 4. 特定业务表：2-特定业务信息
             const ws2 = XLSX.utils.aoa_to_sheet([
                 ["不动产销售说明", null, null, null, null, null, null, null, null, "不动产租赁说明"],
                 ["非必填\n（限40字符)", "必填\n合计（限120字符)", null, "非必填\n（限28字符)", "非必填\n（限20字符)", "非必填\n（限20字符)\t", "必填\n\t（限20字符)", "必填(是/否)\n\t（限2字符)", "必填\n\t（限12字符)", "必填\n（限40字符)\t"],
@@ -453,58 +465,66 @@
             showMessage('CSV 文件已生成并开始下载。', 'success');
         }
 
-        // 🌟 核心：自动探测该 Key 实际可用的最新模型端点（过滤掉已下线的旧版本）
-        async function discoverWorkingEndpoint() {
-            if (appState.cachedModelUrl) return appState.cachedModelUrl;
+        // 🌟 动态建立可用模型调用池（过滤下线旧型号及实验专用型号）
+        async function getModelPool() {
+            if (appState.modelPool && appState.modelPool.length > 0) {
+                return appState.modelPool;
+            }
 
+            const pool = [];
             try {
                 const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${appState.apiKey}`);
                 if (res.ok) {
                     const data = await res.json();
-                    const list = data.models || [];
+                    const list = (data.models || []).filter(m => 
+                        m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent")
+                    );
                     
-                    // 过滤出支持 generateContent 的模型
-                    const valid = list.filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes("generateContent"));
-                    
-                    // 明确排除已被弃用的老模型关键词
-                    const deprecatedKw = ["2.0-flash-lite", "gemini-2.5-flash", "gemini-1.5", "gemini-1.0"];
-                    const activeModels = valid.filter(m => !deprecatedKw.some(kw => m.name.includes(kw)));
-                    
-                    // 优先选择带 flash 的新模型
-                    const best = activeModels.find(m => m.name.includes("flash")) || activeModels[0];
-                    if (best) {
-                        const cleanName = best.name.replace(/^models\//, '');
-                        appState.cachedModelUrl = `https://generativelanguage.googleapis.com/v1beta/models/${cleanName}:generateContent?key=${appState.apiKey}`;
-                        console.log("成功自动适配当前可用模型:", cleanName);
-                        return appState.cachedModelUrl;
-                    }
+                    const deprecatedOrIrrelevant = ["2.0-flash-lite", "gemini-2.5-flash", "gemini-1.5", "gemini-1.0", "thinking", "audio", "tts", "exp"];
+                    const activeModels = list
+                        .map(m => m.name.replace(/^models\//, ''))
+                        .filter(name => !deprecatedOrIrrelevant.some(kw => name.includes(kw)));
+
+                    // 优先放入带 flash 的正式型号
+                    const flashModels = activeModels.filter(name => name.includes("flash"));
+                    const otherModels = activeModels.filter(name => !name.includes("flash"));
+                    pool.push(...flashModels, ...otherModels);
                 }
             } catch (e) {
-                console.warn("自动探测模型列表出错，转入候选重试链:", e);
+                console.warn("自动拉取模型列表出错，使用预设回退列表:", e);
             }
 
-            // 备用候选链（更新为最新有效版本）
-            const candidates = [
-                "gemini-3.6-flash",
-                "gemini-3.5-flash-lite"
-            ];
-            appState.cachedModelUrl = `https://generativelanguage.googleapis.com/v1beta/models/${candidates[0]}:generateContent?key=${appState.apiKey}`;
-            return appState.cachedModelUrl;
+            // 兜底列表
+            const fallbacks = ["gemini-3.6-flash", "gemini-3.5-flash-lite"];
+            fallbacks.forEach(fb => {
+                if (!pool.includes(fb)) pool.push(fb);
+            });
+
+            appState.modelPool = pool;
+            return appState.modelPool;
         }
 
-        async function callGeminiAPI(base64Data, mimeType) {
-            const API_URL = await discoverWorkingEndpoint();
+        // 🌟 带 503/429 指数退避重试 + 404 自动切换模型的调用函数
+        async function callGeminiAPI(base64Data, mimeType, modelIndex = 0, retryCount = 0) {
+            const models = await getModelPool();
+            if (modelIndex >= models.length) {
+                throw new Error("所有可用模型均调用失败，请检查网络或 API 额度。");
+            }
 
-            const systemPrompt = `你是一个专业的送货单数据提取助手。请提取图片中的送货单号以及每一条货物的“名称及规格”、“单位”、“数量”、“单价”。
+            const modelName = models[modelIndex];
+            const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${appState.apiKey}`;
+
+            const systemPrompt = `你是一个专业的送货单数据提取助手。请提取图片中的送货单号以及每一条货物的“纯尺寸规格”、“单位”、“数量”、“单价”。
 注意：
-1. 规格格式：乘号统一用 '*'，保留材质/品名如 'PPE 30*36+5' 或 'FPP 双印 26.5*37+5+2.5'。
+1. 规格格式：【绝对不要包含任何材质或工艺文字，如 PE、PPE、OPP、FPP、双印、防水袋等】，只保留尺寸数字，乘号统一用 '*'（例如 '26.5*37+5+2.5' 或 '30*36+5'）。
 2. 不要提取货号栏。
-3. 请以严格的 JSON 格式输出，格式如下：
+3. 不需要提取手写金额，只需准确提取数量和单价。
+4. 请以严格的 JSON 格式输出，格式如下：
 {
   "deliveryNo": "5118928",
   "items": [
     {
-      "nameAndSpec": "FPP 双印 26.5*37+5+2.5",
+      "nameAndSpec": "26.5*37+5+2.5",
       "unit": "只",
       "quantity": 8400,
       "unitPrice": 0.27,
@@ -518,7 +538,7 @@
                     {
                         role: "user",
                         parts: [
-                            { text: "请提取这张送货单中的单号和全部商品明细，直接输出JSON。" },
+                            { text: "请提取这张送货单中的单号和全部商品纯尺寸明细（过滤掉PE/FPP/双印等文字），直接输出JSON。" },
                             {
                                 inlineData: {
                                     mimeType: mimeType || 'image/jpeg',
@@ -536,56 +556,80 @@
                 }
             };
 
-            const response = await fetch(API_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(payload)
-            });
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
 
-            if (!response.ok) {
-                appState.cachedModelUrl = ""; // 如果当前端点失败，立即重置缓存允许下次重新探测
-                const errorText = await response.text();
-                let errMsg = `HTTP ${response.status}`;
-                try {
-                    const parsedErr = JSON.parse(errorText);
-                    errMsg += ` (${parsedErr.error?.message || errorText})`;
-                } catch(e) {
-                    errMsg += ` (${errorText})`;
+                if (!response.ok) {
+                    const status = response.status;
+                    // 遇到 503 服务过载 或 429 频率限制：自动等待后重试最多 3 次
+                    if ((status === 503 || status === 429 || status === 500) && retryCount < 3) {
+                        const waitMs = (retryCount + 1) * 2000;
+                        D.loadingMessage.textContent = `服务器繁忙 (HTTP ${status})，${waitMs / 1000}秒后自动重试...`;
+                        await sleep(waitMs);
+                        return callGeminiAPI(base64Data, mimeType, modelIndex, retryCount + 1);
+                    }
+
+                    // 遇到 404 模型不存在：立即无缝顺延切换到池中的下一个模型
+                    if (status === 404 && modelIndex + 1 < models.length) {
+                        console.warn(`模型 ${modelName} 返回 404，自动切换到 ${models[modelIndex + 1]}`);
+                        return callGeminiAPI(base64Data, mimeType, modelIndex + 1, 0);
+                    }
+
+                    const errorText = await response.text();
+                    let errMsg = `HTTP ${status}`;
+                    try {
+                        const parsedErr = JSON.parse(errorText);
+                        errMsg += ` (${parsedErr.error?.message || errorText})`;
+                    } catch (e) {
+                        errMsg += ` (${errorText})`;
+                    }
+                    throw new Error(errMsg);
                 }
-                throw new Error(errMsg);
-            }
 
-            const result = await response.json();
-            const textOutput = result.candidates?.[0]?.content?.parts?.[0]?.text;
+                const result = await response.json();
+                const textOutput = result.candidates?.[0]?.content?.parts?.[0]?.text;
 
-            if (!textOutput) {
-                throw new Error("模型未返回文本内容");
-            }
-
-            const cleanedJsonString = textOutput.replace(/```json/gi, '').replace(/```/g, '').trim();
-            const parsed = JSON.parse(cleanedJsonString);
-            
-            let deliveryNo = "";
-            let items = [];
-
-            if (Array.isArray(parsed)) {
-                items = parsed;
-            } else if (parsed && typeof parsed === 'object') {
-                deliveryNo = parsed.deliveryNo || parsed.orderNo || parsed.no || "";
-                items = parsed.items || parsed.details || parsed.list || [];
-                if (!Array.isArray(items) && parsed.nameAndSpec) {
-                    items = [parsed];
+                if (!textOutput) {
+                    throw new Error("模型未返回文本内容");
                 }
-            }
 
-            return items.map(item => ({
-                deliveryNo: item.deliveryNo || deliveryNo,
-                nameAndSpec: item.nameAndSpec || item.spec || "",
-                unit: item.unit || "只",
-                quantity: Number(item.quantity) || 0,
-                unitPrice: Number(item.unitPrice) || 0,
-                isPriceCertain: item.isPriceCertain !== false
-            })).filter(item => item.nameAndSpec);
+                const cleanedJsonString = textOutput.replace(/```json/gi, '').replace(/```/g, '').trim();
+                const parsed = JSON.parse(cleanedJsonString);
+                
+                let deliveryNo = "";
+                let items = [];
+
+                if (Array.isArray(parsed)) {
+                    items = parsed;
+                } else if (parsed && typeof parsed === 'object') {
+                    deliveryNo = parsed.deliveryNo || parsed.orderNo || parsed.no || "";
+                    items = parsed.items || parsed.details || parsed.list || [];
+                    if (!Array.isArray(items) && parsed.nameAndSpec) {
+                        items = [parsed];
+                    }
+                }
+
+                return items.map(item => ({
+                    deliveryNo: item.deliveryNo || deliveryNo,
+                    nameAndSpec: cleanSpecString(item.nameAndSpec || item.spec || ""),
+                    unit: item.unit || "只",
+                    quantity: Number(item.quantity) || 0,
+                    unitPrice: Number(item.unitPrice) || 0,
+                    isPriceCertain: item.isPriceCertain !== false
+                })).filter(item => item.nameAndSpec);
+
+            } catch (err) {
+                // 网络中断等 fetch 异常也允许重连 2 次
+                if (err.name === 'TypeError' && retryCount < 2) {
+                    await sleep(2000);
+                    return callGeminiAPI(base64Data, mimeType, modelIndex, retryCount + 1);
+                }
+                throw err;
+            }
         }
 
         async function handleProcessAll() {
@@ -615,11 +659,7 @@
 
                     if (items && items.length > 0) {
                         items.forEach(item => {
-                            if (item.nameAndSpec && item.nameAndSpec.includes('防水袋')) {
-                                item.nameAndSpec = item.nameAndSpec.replace(/(\d{2})(\d{2})(\d{2})/g, (match, p1, p2, p3) => {
-                                    return match.includes('*') ? match : `${p1}*${p2}*${p3}`;
-                                });
-                            }
+                            item.nameAndSpec = cleanSpecString(item.nameAndSpec);
                         });
                         appState.extractedItems.push(...items);
                     } else {
@@ -629,6 +669,11 @@
                 } catch (error) {
                     console.error(`处理图片 ${fileNumber} 出错:`, error);
                     errors.push(`第 ${fileNumber} 张图片 (${file.name}): ${error.message}`);
+                }
+
+                // 多图处理时每张间隔 600ms，防止瞬间并发触发 503/429
+                if (i < totalFiles - 1) {
+                    await sleep(600);
                 }
             }
             
