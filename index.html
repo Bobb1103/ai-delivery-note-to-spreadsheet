@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>手写送货单电子化工具</title>
     
-    <!-- Tailwind CSS (界面样式库) -->
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- SheetJS (Excel 原版模板读写库) -->
+    <!-- SheetJS -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         body {
@@ -33,11 +33,8 @@
             <p class="text-gray-600">自动提取纯尺寸规格、在线微调核对、一键导出税务局标准导入模板。</p>
         </header>
 
-        <!-- 全局脚本错误提示区（防止静默白屏） -->
-        <div id="fatalErrorBox" class="mb-6 p-4 bg-red-100 border border-red-400 text-red-800 rounded-lg text-sm hidden"></div>
-
-        <!-- API Key 设置区 -->
-        <section id="apiKeySection" class="mb-8 p-6 bg-yellow-50 border border-yellow-300 rounded-lg shadow-inner hidden">
+        <!-- API Key 设置区（默认不加 hidden，杜绝白屏） -->
+        <section id="apiKeySection" class="mb-8 p-6 bg-yellow-50 border border-yellow-300 rounded-lg shadow-inner">
             <h2 class="text-xl font-semibold text-yellow-800 mb-4">🔑 设置 API 密钥</h2>
             <p class="text-sm text-yellow-700 mb-4">密钥仅保存在您的本地浏览器中，不会上传到任何第三方服务器。</p>
             <div class="flex flex-col gap-3">
@@ -112,9 +109,7 @@
                     <h2 class="text-xl font-semibold text-gray-800">📦 汇总识别结果表格 (点击单元格可直接修改)</h2>
                 </div>
                 
-                <div id="tableOutput" class="overflow-x-auto mb-4 border border-gray-200 rounded-lg shadow-md">
-                    <!-- 表格动态生成 -->
-                </div>
+                <div id="tableOutput" class="overflow-x-auto mb-4 border border-gray-200 rounded-lg shadow-md"></div>
 
                 <div class="flex flex-col sm:flex-row gap-3">
                     <button type="button" id="exportExcelButton"
@@ -137,17 +132,6 @@
     </div>
 
     <script>
-        // 全局异常监听：确保任何脚本异常都能直接显示在界面上
-        window.onerror = function(msg, url, lineNo) {
-            var box = document.getElementById('fatalErrorBox');
-            if (box) {
-                box.textContent = "页面脚本运行异常 (第 " + lineNo + " 行): " + msg;
-                box.classList.remove('hidden');
-            }
-            return false;
-        };
-
-        // 应用全局状态管理
         var appState = {
             apiKey: "",
             files: [],
@@ -156,7 +140,6 @@
             modelPool: []
         };
 
-        // 集中获取页面 DOM 元素
         var D = {
             apiKeySection: document.getElementById('apiKeySection'),
             apiKeyInput: document.getElementById('apiKeyInput'),
@@ -179,148 +162,5 @@
             previewSection: document.getElementById('previewSection')
         };
 
-        // 延时辅助函数
         function sleep(ms) {
-            return new Promise(function(resolve) {
-                setTimeout(resolve, ms);
-            });
-        }
-
-        // 初始化本地密钥检测
-        function initKeySystem() {
-            var storedKey = localStorage.getItem('GEMINI_API_KEY');
-            if (storedKey && storedKey.trim().length > 10) {
-                appState.apiKey = storedKey.trim();
-                showMainContent();
-            } else {
-                showKeySetup();
-            }
-        }
-
-        function showKeySetup() {
-            D.apiKeySection.classList.remove('hidden');
-            D.mainContent.classList.add('hidden');
-        }
-
-        function showMainContent() {
-            D.apiKeySection.classList.add('hidden');
-            D.mainContent.classList.remove('hidden');
-        }
-
-        // 显示状态提示信息
-        function showMessage(message, type) {
-            D.messageBox.textContent = message;
-            D.messageBox.classList.remove('hidden', 'bg-red-100', 'text-red-700', 'bg-green-100', 'text-green-700', 'bg-blue-100', 'text-blue-700');
-
-            if (type === 'error') {
-                D.messageBox.classList.add('bg-red-100', 'text-red-700');
-            } else if (type === 'success') {
-                D.messageBox.classList.add('bg-green-100', 'text-green-700');
-            } else {
-                D.messageBox.classList.add('bg-blue-100', 'text-blue-700');
-            }
-            D.messageBox.classList.remove('hidden');
-        }
-
-        // 重置页面状态
-        function resetApp() {
-            appState.files = [];
-            appState.extractedItems = [];
-            appState.isProcessing = false;
-            
-            D.imageInput.value = '';
-            D.processButton.disabled = true;
-            D.clearImageButton.disabled = true;
-            
-            D.previewSection.classList.add('hidden');
-            D.resultsSection.classList.add('hidden');
-            D.loadingIndicator.classList.add('hidden');
-            
-            D.tableOutput.innerHTML = '';
-            D.messageBox.classList.add('hidden');
-            if (appState.apiKey) {
-                showMessage('请选择一张或多张送货单图片开始处理。', 'info');
-            }
-        }
-
-        // 清洗规格：去除材质及工艺名称（如 PE、FPP、双印等），仅保留纯数字尺寸
-        function cleanSpecString(spec) {
-            if (!spec) return "";
-            var s = String(spec).trim();
-            // 定位到第一个数字（0-9）出现的位置并截取后续纯尺寸
-            var firstDigitIndex = s.search(/[0-9]/);
-            if (firstDigitIndex > 0) {
-                s = s.substring(firstDigitIndex).trim();
-            }
-            // 将各种乘号统一替换为半角星号 *
-            s = s.replace(/[xX×]/g, '*');
-            return s;
-        }
-
-        // 前端图片等比缩放与压缩（解决手机原图体积过大导致超时问题）
-        function compressAndConvertToBase64(file) {
-            var maxDimension = 1600;
-            var quality = 0.85;
-            return new Promise(function(resolve) {
-                var reader = new FileReader();
-                reader.onload = function(e) {
-                    var rawResult = e.target.result;
-                    var fallback = function() {
-                        var parts = rawResult.split(',');
-                        resolve({
-                            base64Data: parts[1],
-                            mimeType: file.type || 'image/jpeg'
-                        });
-                    };
-
-                    var img = new Image();
-                    img.onload = function() {
-                        try {
-                            var width = img.width;
-                            var height = img.height;
-                            if (width > maxDimension || height > maxDimension) {
-                                if (width > height) {
-                                    height = Math.round((height * maxDimension) / width);
-                                    width = maxDimension;
-                                } else {
-                                    width = Math.round((width * maxDimension) / height);
-                                    height = maxDimension;
-                                }
-                            }
-
-                            var canvas = document.createElement('canvas');
-                            canvas.width = width;
-                            canvas.height = height;
-                            var ctx = canvas.getContext('2d');
-                            ctx.drawImage(img, 0, 0, width, height);
-
-                            var dataUrl = canvas.toDataURL('image/jpeg', quality);
-                            resolve({
-                                base64Data: dataUrl.split(',')[1],
-                                mimeType: 'image/jpeg'
-                            });
-                        } catch (err) {
-                            fallback();
-                        }
-                    };
-                    img.onerror = fallback;
-                    img.src = rawResult;
-                };
-                reader.onerror = function() {
-                    resolve({ base64Data: '', mimeType: 'image/jpeg' });
-                };
-                reader.readAsDataURL(file);
-            });
-        }
-
-        // 渲染可直接在页面微调数据的汇总表格
-        function renderTable(items) {
-            if (!items || items.length === 0) {
-                D.tableOutput.innerHTML = '<p class="text-center text-gray-500 p-4">未提取到任何有效数据。</p>';
-                return;
-            }
-
-            var html = '<table class="min-w-full divide-y divide-gray-200">' +
-                '<thead class="bg-indigo-100">' +
-                '<tr>' +
-                '<th class="px-3 py-3 text-left text-xs font-semibold text-indigo-700 uppercase">送货单号
+            return new
