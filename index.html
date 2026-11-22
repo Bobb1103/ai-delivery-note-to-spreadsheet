@@ -37,7 +37,7 @@
         <!-- API Key 设置区 -->
         <section id="apiKeySection" class="mb-8 p-6 bg-yellow-50 border border-yellow-300 rounded-lg shadow-inner">
             <h2 class="text-xl font-semibold text-yellow-800 mb-4">🔑 设置 API 密钥</h2>
-            <p class="text-sm text-yellow-700 mb-4">密钥仅保存在您的本地浏览器中，不会上传到任何第三方服务器。</p>
+            <p class="text-sm text-yellow-700 mb-4">密钥仅保存在您的本地浏览器中，不会上传到任何第三方服务器（已开启非法字符自动净化防呆）。</p>
             <div class="flex flex-col gap-3">
                 <div>
                     <label for="providerSelectSetup" class="block text-xs font-semibold text-yellow-800 mb-1">选择识别引擎服务商：</label>
@@ -158,7 +158,7 @@
     </div>
 
     <script>
-        // 全局状态管理（新增 provider 字段区分智谱与 Gemini）
+        // 全局状态管理
         var appState = {
             provider: "zhipu",
             apiKey: "",
@@ -178,6 +178,20 @@
             return new Promise(function(resolve) {
                 setTimeout(resolve, ms);
             });
+        }
+
+        // 【核心防呆函数】强制净化 API Key：仅保留标准可见 ASCII 字符 (编码 33~126)，彻底剔除零宽空格、中文标点、空格和换行
+        function sanitizeApiKey(raw) {
+            if (!raw) return "";
+            var str = String(raw);
+            var clean = "";
+            for (var i = 0; i < str.length; i++) {
+                var code = str.charCodeAt(i);
+                if (code >= 33 && code <= 126) {
+                    clean += str.charAt(i);
+                }
+            }
+            return clean;
         }
 
         // 获取对应服务商的本地存储键名
@@ -206,7 +220,7 @@
             el('apiKeyInput').placeholder = val === "zhipu"
                 ? "请粘贴您的智谱 AI API Key (格式如 xxx.xxx)"
                 : "请粘贴您的 Google Gemini API Key";
-            var saved = localStorage.getItem(getStorageKeyName(val)) || "";
+            var saved = sanitizeApiKey(localStorage.getItem(getStorageKeyName(val)) || "");
             el('apiKeyInput').value = saved;
         };
 
@@ -214,13 +228,13 @@
         window.switchMainProvider = function(val) {
             appState.provider = val;
             localStorage.setItem('ACTIVE_AI_PROVIDER', val);
-            var saved = localStorage.getItem(getStorageKeyName(val));
-            if (saved && saved.trim().length >= 15) {
-                appState.apiKey = saved.trim();
+            var saved = sanitizeApiKey(localStorage.getItem(getStorageKeyName(val)) || "");
+            if (saved.length >= 15) {
+                appState.apiKey = saved;
+                localStorage.setItem(getStorageKeyName(val), saved);
                 appState.modelPool = [];
                 showMessage('已切换至 ' + (val === 'zhipu' ? '智谱 AI (大陆直连)' : 'Google Gemini') + ' 引擎。', 'info');
             } else {
-                // 若目标服务商尚未保存过密钥，弹出密钥设置框
                 el('providerSelectSetup').value = val;
                 window.onSetupProviderChange(val);
                 el('mainContent').classList.add('hidden');
@@ -241,12 +255,13 @@
             }
         };
 
-        // 保存 API 密钥到本地浏览器
+        // 保存 API 密钥到本地浏览器（自动剔除一切非 ASCII 字符）
         window.saveApiKey = function() {
             var provider = el('providerSelectSetup').value || "zhipu";
             var inp = el('apiKeyInput');
-            var raw = inp.value || "";
-            var cleaned = raw.split(' ').join('').split('\n').join('').split('\r').join('').trim();
+            var cleaned = sanitizeApiKey(inp.value);
+            inp.value = cleaned;
+
             if (cleaned.length >= 15) {
                 appState.provider = provider;
                 appState.apiKey = cleaned;
@@ -256,9 +271,9 @@
                 el('providerSelectMain').value = provider;
                 el('apiKeySection').classList.add('hidden');
                 el('mainContent').classList.remove('hidden');
-                showMessage('密钥已保存到本地浏览器，请上传送货单照片。', 'success');
+                showMessage('密钥已净化并保存到本地浏览器，请上传送货单照片。', 'success');
             } else {
-                alert('请输入有效的 API Key（请检查是否完整复制）');
+                alert('请输入有效的纯英文数字 API Key（请检查是否完整复制）');
             }
         };
 
@@ -472,9 +487,11 @@
             return resultItems;
         }
 
-        // 【新增】调用智谱 AI 开放平台接口（大陆直连，glm-4v-flash 免费视觉模型）
+        // 调用智谱 AI 开放平台接口（大陆直连，glm-4v-flash 免费视觉模型）
         async function callZhipuAPI(base64Data, mimeType, retryCount) {
             retryCount = retryCount || 0;
+            // 请求前再次强制净化 Key，杜绝任何非 ASCII 字符导致 headers 报错
+            var safeKey = sanitizeApiKey(appState.apiKey);
             var url = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
             var payload = {
                 model: "glm-4v-flash",
@@ -501,7 +518,7 @@
             var res = await fetch(url, {
                 method: "POST",
                 headers: {
-                    "Authorization": "Bearer " + appState.apiKey,
+                    "Authorization": "Bearer " + safeKey,
                     "Content-Type": "application/json"
                 },
                 body: JSON.stringify(payload)
@@ -529,9 +546,10 @@
         // 获取 Gemini 模型池
         async function getModelPool() {
             if (appState.modelPool.length > 0) return appState.modelPool;
+            var safeKey = sanitizeApiKey(appState.apiKey);
             var pool = [];
             try {
-                var res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + appState.apiKey);
+                var res = await fetch('https://generativelanguage.googleapis.com/v1beta/models?key=' + safeKey);
                 if (res.ok) {
                     var data = await res.json();
                     var list = data.models || [];
@@ -572,12 +590,13 @@
         async function callGeminiAPI(base64Data, mimeType, modelIndex, retryCount) {
             modelIndex = modelIndex || 0;
             retryCount = retryCount || 0;
+            var safeKey = sanitizeApiKey(appState.apiKey);
             var models = await getModelPool();
             if (modelIndex >= models.length) {
                 throw new Error("当前 Google 所有模型节点均在高负载排队 (503)，请稍等 10 秒再试。");
             }
             var modelName = models[modelIndex];
-            var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + modelName + ':generateContent?key=' + appState.apiKey;
+            var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + modelName + ':generateContent?key=' + safeKey;
 
             var payload = {
                 contents: [{
@@ -742,7 +761,7 @@
             document.body.removeChild(a);
         };
 
-        // 初始化页面状态
+        // 初始化页面状态（启动时自动净化本地已存密钥）
         (function init() {
             var badge = el('jsStatusBadge');
             if (badge) {
@@ -755,9 +774,11 @@
             el('providerSelectMain').value = activeProvider;
             window.onSetupProviderChange(activeProvider);
 
-            var savedKey = localStorage.getItem(getStorageKeyName(activeProvider));
-            if (savedKey && savedKey.trim().length >= 15) {
-                appState.apiKey = savedKey.trim();
+            var rawSavedKey = localStorage.getItem(getStorageKeyName(activeProvider)) || "";
+            var cleanSavedKey = sanitizeApiKey(rawSavedKey);
+            if (cleanSavedKey.length >= 15) {
+                appState.apiKey = cleanSavedKey;
+                localStorage.setItem(getStorageKeyName(activeProvider), cleanSavedKey);
                 el('apiKeySection').classList.add('hidden');
                 el('mainContent').classList.remove('hidden');
             }
