@@ -1,16 +1,3 @@
-检查原有网页端代码后确认：**目前网页版仅接入了 Google Gemini 接口，尚未写入智谱 AI 接口**。
-
-遵循“仅新增智谱 AI 接口并保持其他功能、排版、清洗规则、可编辑表格及税务四表 Excel 导出完全不变”的原则，已在原有网页基础上做了最小化增量升级：
-
-1. **新增服务商选择下拉框**：在 API Key 设置区与主界面顶部增加了通道切换（默认推荐 **`智谱 AI (大陆直连 / glm-4v-flash 免费)`**，同时保留 **`Google Gemini (备用)`**，两者 Key 独立保存在浏览器本地互不干扰）。
-2. **新增智谱 AI 识别通道 (`callZhipuAPI`)**：大陆网络直接请求 `[https://open.bigmodel.cn/api/paas/v4/chat/completions](https://open.bigmodel.cn/api/paas/v4/chat/completions)` 调用 `glm-4v-flash`，沿用完全一致的提示词、涂改数字忽略规则及 JSON 提取器。
-3. **其余功能 100% 保持原样**：包括前端压缩（`1280px`）、纯尺寸规格清洗（去掉 `PE/FPP/双印` 等）、自动识别 `电雕版`、预览表内点击修改（单号/开票品名/规格/单位/数量/单价）及实时重算金额、导出税务局 4 Sheet 标准 Excel 和 CSV 均未作任何改动。
-
----
-
-### 完整更新版网页代码（直接覆盖 GitHub 仓库的 `index.html`）
-
-```html
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -778,5 +765,3 @@
     </script>
 </body>
 </html>
-
-```
