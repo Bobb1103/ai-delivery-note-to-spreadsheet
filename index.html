@@ -1,3 +1,16 @@
+检查原有网页端代码后确认：**目前网页版仅接入了 Google Gemini 接口，尚未写入智谱 AI 接口**。
+
+遵循“仅新增智谱 AI 接口并保持其他功能、排版、清洗规则、可编辑表格及税务四表 Excel 导出完全不变”的原则，已在原有网页基础上做了最小化增量升级：
+
+1. **新增服务商选择下拉框**：在 API Key 设置区与主界面顶部增加了通道切换（默认推荐 **`智谱 AI (大陆直连 / glm-4v-flash 免费)`**，同时保留 **`Google Gemini (备用)`**，两者 Key 独立保存在浏览器本地互不干扰）。
+2. **新增智谱 AI 识别通道 (`callZhipuAPI`)**：大陆网络直接请求 `[https://open.bigmodel.cn/api/paas/v4/chat/completions](https://open.bigmodel.cn/api/paas/v4/chat/completions)` 调用 `glm-4v-flash`，沿用完全一致的提示词、涂改数字忽略规则及 JSON 提取器。
+3. **其余功能 100% 保持原样**：包括前端压缩（`1280px`）、纯尺寸规格清洗（去掉 `PE/FPP/双印` 等）、自动识别 `电雕版`、预览表内点击修改（单号/开票品名/规格/单位/数量/单价）及实时重算金额、导出税务局 4 Sheet 标准 Excel 和 CSV 均未作任何改动。
+
+---
+
+### 完整更新版网页代码（直接覆盖 GitHub 仓库的 `index.html`）
+
+```html
 <!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -31,7 +44,7 @@
         <header class="text-center mb-8 relative">
             <span id="jsStatusBadge" class="absolute right-0 top-0 text-xs px-2 py-1 rounded bg-red-100 text-red-600">⏳ 脚本加载中</span>
             <h1 class="text-3xl font-extrabold text-indigo-700 border-b-2 border-indigo-100 pb-3 mb-2">手写送货单电子化助手</h1>
-            <p class="text-gray-600">优先调度高速空闲节点、防涂改干扰解析、支持品名/尺寸在线修改及税局模板导出。</p>
+            <p class="text-gray-600">支持智谱 AI 大陆直连（免费）、防涂改干扰解析、品名/尺寸在线修改及税局模板导出。</p>
         </header>
 
         <!-- API Key 设置区 -->
@@ -39,8 +52,15 @@
             <h2 class="text-xl font-semibold text-yellow-800 mb-4">🔑 设置 API 密钥</h2>
             <p class="text-sm text-yellow-700 mb-4">密钥仅保存在您的本地浏览器中，不会上传到任何第三方服务器。</p>
             <div class="flex flex-col gap-3">
+                <div>
+                    <label for="providerSelectSetup" class="block text-xs font-semibold text-yellow-800 mb-1">选择识别引擎服务商：</label>
+                    <select id="providerSelectSetup" onchange="window.onSetupProviderChange(this.value)" class="w-full p-2.5 border border-yellow-300 rounded-lg bg-white text-sm text-gray-800">
+                        <option value="zhipu">智谱 AI (大陆直连 / glm-4v-flash 免费推荐)</option>
+                        <option value="gemini">Google Gemini (需海外网络环境)</option>
+                    </select>
+                </div>
                 <div class="relative">
-                    <input type="password" id="apiKeyInput" placeholder="请粘贴您的 Gemini API Key" 
+                    <input type="password" id="apiKeyInput" placeholder="请粘贴您的智谱 AI API Key" 
                         class="w-full p-3 pr-12 border border-yellow-300 rounded-lg focus:ring-2 focus:ring-yellow-500 outline-none">
                     <button type="button" onclick="window.toggleKey()" id="toggleKeyVisible" class="absolute right-3 top-3 text-gray-500 hover:text-gray-700 text-sm">
                         👁️
@@ -55,18 +75,27 @@
         <!-- 主要应用内容 -->
         <div id="mainContent" class="hidden">
             
-            <div class="flex justify-between items-center mb-4">
-                <div class="flex items-center gap-2">
-                    <label for="taxRateSelect" class="text-xs font-semibold text-gray-600">发票默认税率：</label>
-                    <select id="taxRateSelect" class="text-xs border border-gray-300 rounded px-2 py-1 bg-white">
-                        <option value="0.13">13% (0.13)</option>
-                        <option value="0.03">3% (0.03)</option>
-                        <option value="0.01">1% (0.01)</option>
-                        <option value="0">免税/0% (0)</option>
-                    </select>
+            <div class="flex flex-wrap justify-between items-center gap-3 mb-4">
+                <div class="flex flex-wrap items-center gap-3">
+                    <div class="flex items-center gap-1.5">
+                        <label for="taxRateSelect" class="text-xs font-semibold text-gray-600">发票默认税率：</label>
+                        <select id="taxRateSelect" class="text-xs border border-gray-300 rounded px-2 py-1 bg-white">
+                            <option value="0.13">13% (0.13)</option>
+                            <option value="0.03">3% (0.03)</option>
+                            <option value="0.01">1% (0.01)</option>
+                            <option value="0">免税/0% (0)</option>
+                        </select>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <label for="providerSelectMain" class="text-xs font-semibold text-gray-600">当前引擎：</label>
+                        <select id="providerSelectMain" onchange="window.switchMainProvider(this.value)" class="text-xs border border-indigo-200 rounded px-2 py-1 bg-indigo-50 text-indigo-700 font-medium">
+                            <option value="zhipu">智谱 AI (glm-4v-flash)</option>
+                            <option value="gemini">Google Gemini</option>
+                        </select>
+                    </div>
                 </div>
                 <button type="button" onclick="window.resetApiKey()" class="text-xs text-gray-400 hover:text-indigo-600 underline transition duration-150">
-                    重置/更换 API 密钥
+                    重置/更换当前引擎密钥
                 </button>
             </div>
 
@@ -142,8 +171,9 @@
     </div>
 
     <script>
-        // 全局状态管理
+        // 全局状态管理（新增 provider 字段区分智谱与 Gemini）
         var appState = {
+            provider: "zhipu",
             apiKey: "",
             files: [],
             extractedItems: [],
@@ -163,6 +193,11 @@
             });
         }
 
+        // 获取对应服务商的本地存储键名
+        function getStorageKeyName(provider) {
+            return provider === "zhipu" ? "ZHIPU_API_KEY" : "GEMINI_API_KEY";
+        }
+
         // 状态消息提示框
         function showMessage(message, type) {
             var box = el('messageBox');
@@ -176,6 +211,35 @@
                 box.classList.add('bg-blue-100', 'text-blue-700');
             }
         }
+
+        // 设置页切换服务商时同步输入框占位提示与已存密钥
+        window.onSetupProviderChange = function(val) {
+            appState.provider = val;
+            localStorage.setItem('ACTIVE_AI_PROVIDER', val);
+            el('apiKeyInput').placeholder = val === "zhipu"
+                ? "请粘贴您的智谱 AI API Key (格式如 xxx.xxx)"
+                : "请粘贴您的 Google Gemini API Key";
+            var saved = localStorage.getItem(getStorageKeyName(val)) || "";
+            el('apiKeyInput').value = saved;
+        };
+
+        // 主界面切换服务商
+        window.switchMainProvider = function(val) {
+            appState.provider = val;
+            localStorage.setItem('ACTIVE_AI_PROVIDER', val);
+            var saved = localStorage.getItem(getStorageKeyName(val));
+            if (saved && saved.trim().length >= 15) {
+                appState.apiKey = saved.trim();
+                appState.modelPool = [];
+                showMessage('已切换至 ' + (val === 'zhipu' ? '智谱 AI (大陆直连)' : 'Google Gemini') + ' 引擎。', 'info');
+            } else {
+                // 若目标服务商尚未保存过密钥，弹出密钥设置框
+                el('providerSelectSetup').value = val;
+                window.onSetupProviderChange(val);
+                el('mainContent').classList.add('hidden');
+                el('apiKeySection').classList.remove('hidden');
+            }
+        };
 
         // API 密钥显隐切换
         window.toggleKey = function() {
@@ -192,13 +256,17 @@
 
         // 保存 API 密钥到本地浏览器
         window.saveApiKey = function() {
+            var provider = el('providerSelectSetup').value || "zhipu";
             var inp = el('apiKeyInput');
             var raw = inp.value || "";
             var cleaned = raw.split(' ').join('').split('\n').join('').split('\r').join('').trim();
             if (cleaned.length >= 15) {
-                localStorage.setItem('GEMINI_API_KEY', cleaned);
+                appState.provider = provider;
                 appState.apiKey = cleaned;
                 appState.modelPool = [];
+                localStorage.setItem('ACTIVE_AI_PROVIDER', provider);
+                localStorage.setItem(getStorageKeyName(provider), cleaned);
+                el('providerSelectMain').value = provider;
                 el('apiKeySection').classList.add('hidden');
                 el('mainContent').classList.remove('hidden');
                 showMessage('密钥已保存到本地浏览器，请上传送货单照片。', 'success');
@@ -207,13 +275,15 @@
             }
         };
 
-        // 重置 API 密钥
+        // 重置当前服务商的 API 密钥
         window.resetApiKey = function() {
-            if (confirm('确定要清除本地保存的 API 密钥吗？')) {
-                localStorage.removeItem('GEMINI_API_KEY');
+            var label = appState.provider === 'zhipu' ? '智谱 AI' : 'Google Gemini';
+            if (confirm('确定要清除本地保存的 ' + label + ' 密钥吗？')) {
+                localStorage.removeItem(getStorageKeyName(appState.provider));
                 appState.apiKey = "";
                 appState.modelPool = [];
-                el('apiKeyInput').value = "";
+                el('providerSelectSetup').value = appState.provider;
+                window.onSetupProviderChange(appState.provider);
                 window.resetAll();
                 el('mainContent').classList.add('hidden');
                 el('apiKeySection').classList.remove('hidden');
@@ -368,7 +438,108 @@
             el('tableOutput').innerHTML = html;
         }
 
-        // 获取模型池：优先将空闲高速的 lite 节点排在第一位
+        // 获取统一提示词
+        function buildExtractionPrompt() {
+            return '你是专业的送货单数据提取助手。请提取图片中的送货单号以及每行货物的“开票品名”、“纯尺寸规格”、“单位”、“数量”、“单价”。\n' +
+                '严格遵守以下规则：\n' +
+                '1. 开票品名：默认统一填 "胶袋"；但如果单据上明确写着“新制电雕版”、“电雕版”或“版费”，则 itemName 填 "电雕版"。\n' +
+                '2. 规格型号：【绝对不要包含PE、PPE、OPP、FPP、双印、防水袋、新制电雕版等材质或工艺名称】，只提取纯尺寸数字，乘号统一用 *（例如 26.5*37+5+2.5 或 720*520）。\n' +
+                '3. 涂改数字处理：如果单价或数量栏有被涂黑、划掉的旧数字，请完全忽略涂改部分，只提取旁边清晰的有效数字；不要把“包装件数”栏里的金额当成数量。\n' +
+                '4. 不提取货号，不提取手写金额。\n' +
+                '5. 仅输出纯JSON，格式：{"deliveryNo":"5118929","items":[{"itemName":"胶袋","nameAndSpec":"34*38+5+2.5","unit":"只","quantity":1050,"unitPrice":0.34,"isPriceCertain":true}]}';
+        }
+
+        // 强化版 JSON 提取器
+        function extractJsonSafely(text) {
+            var tick3 = String.fromCharCode(96, 96, 96);
+            var clean = text.split(tick3 + 'json').join('').split(tick3 + 'JSON').join('').split(tick3).join('').trim();
+            var start = clean.indexOf('{');
+            var end = clean.lastIndexOf('}');
+            if (start !== -1 && end !== -1 && end > start) {
+                clean = clean.substring(start, end + 1);
+            }
+            return JSON.parse(clean);
+        }
+
+        // 统一格式化识别结果列表
+        function formatExtractedResult(parsed) {
+            var dNo = parsed.deliveryNo || parsed.orderNo || "";
+            var list = Array.isArray(parsed) ? parsed : (parsed.items || parsed.details || []);
+            var resultItems = [];
+
+            for (var i = 0; i < list.length; i++) {
+                var it = list[i];
+                var spec = cleanSpecString(it.nameAndSpec || it.spec || "");
+                if (spec) {
+                    resultItems.push({
+                        deliveryNo: it.deliveryNo || dNo,
+                        itemName: it.itemName || "胶袋",
+                        nameAndSpec: spec,
+                        unit: it.unit || "只",
+                        quantity: Number(it.quantity) || 0,
+                        unitPrice: Number(it.unitPrice) || 0,
+                        isPriceCertain: it.isPriceCertain !== false
+                    });
+                }
+            }
+            return resultItems;
+        }
+
+        // 【新增】调用智谱 AI 开放平台接口（大陆直连，glm-4v-flash 免费视觉模型）
+        async function callZhipuAPI(base64Data, mimeType, retryCount) {
+            retryCount = retryCount || 0;
+            var url = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
+            var payload = {
+                model: "glm-4v-flash",
+                temperature: 0.1,
+                messages: [
+                    {
+                        role: "user",
+                        content: [
+                            {
+                                type: "image_url",
+                                image_url: {
+                                    url: "data:" + (mimeType || "image/jpeg") + ";base64," + base64Data
+                                }
+                            },
+                            {
+                                type: "text",
+                                text: buildExtractionPrompt()
+                            }
+                        ]
+                    }
+                ]
+            };
+
+            var res = await fetch(url, {
+                method: "POST",
+                headers: {
+                    "Authorization": "Bearer " + appState.apiKey,
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!res.ok) {
+                var st = res.status;
+                if ((st === 429 || st === 500 || st === 503) && retryCount < 2) {
+                    el('loadingMessage').textContent = '智谱接口繁忙 (' + st + ')，正在自动重试...';
+                    await sleep(1500);
+                    return callZhipuAPI(base64Data, mimeType, retryCount + 1);
+                }
+                var errText = await res.text();
+                throw new Error('HTTP ' + st + ' (' + errText + ')');
+            }
+
+            var data = await res.json();
+            var rawText = data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content;
+            if (!rawText) throw new Error("智谱模型未返回有效内容");
+
+            var parsed = extractJsonSafely(rawText);
+            return formatExtractedResult(parsed);
+        }
+
+        // 获取 Gemini 模型池
         async function getModelPool() {
             if (appState.modelPool.length > 0) return appState.modelPool;
             var pool = [];
@@ -410,19 +581,7 @@
             return pool;
         }
 
-        // 强化版 JSON 提取器
-        function extractJsonSafely(text) {
-            var tick3 = String.fromCharCode(96, 96, 96);
-            var clean = text.split(tick3 + 'json').join('').split(tick3 + 'JSON').join('').split(tick3).join('').trim();
-            var start = clean.indexOf('{');
-            var end = clean.lastIndexOf('}');
-            if (start !== -1 && end !== -1 && end > start) {
-                clean = clean.substring(start, end + 1);
-            }
-            return JSON.parse(clean);
-        }
-
-        // 调用 AI 提取单张送货单
+        // 调用 Google Gemini 接口（备用）
         async function callGeminiAPI(base64Data, mimeType, modelIndex, retryCount) {
             modelIndex = modelIndex || 0;
             retryCount = retryCount || 0;
@@ -433,19 +592,11 @@
             var modelName = models[modelIndex];
             var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + modelName + ':generateContent?key=' + appState.apiKey;
 
-            var promptText = '你是专业的送货单数据提取助手。请提取图片中的送货单号以及每行货物的“开票品名”、“纯尺寸规格”、“单位”、“数量”、“单价”。\n' +
-                '严格遵守以下规则：\n' +
-                '1. 开票品名：默认统一填 "胶袋"；但如果单据上明确写着“新制电雕版”、“电雕版”或“版费”，则 itemName 填 "电雕版"。\n' +
-                '2. 规格型号：【绝对不要包含PE、PPE、OPP、FPP、双印、防水袋、新制电雕版等材质或工艺名称】，只提取纯尺寸数字，乘号统一用 *（例如 26.5*37+5+2.5 或 720*520）。\n' +
-                '3. 涂改数字处理：如果单价或数量栏有被涂黑、划掉的旧数字，请完全忽略涂改部分，只提取旁边清晰的有效数字；不要把“包装件数”栏里的金额当成数量。\n' +
-                '4. 不提取货号，不提取手写金额。\n' +
-                '5. 仅输出纯JSON，格式：{"deliveryNo":"5118929","items":[{"itemName":"胶袋","nameAndSpec":"34*38+5+2.5","unit":"只","quantity":1050,"unitPrice":0.34,"isPriceCertain":true}]}';
-
             var payload = {
                 contents: [{
                     role: "user",
                     parts: [
-                        { text: promptText },
+                        { text: buildExtractionPrompt() },
                         { inlineData: { mimeType: mimeType || 'image/jpeg', data: base64Data } }
                     ]
                 }],
@@ -485,29 +636,10 @@
             if (!rawText) throw new Error("模型未返回文本");
 
             var parsed = extractJsonSafely(rawText);
-            var dNo = parsed.deliveryNo || parsed.orderNo || "";
-            var list = Array.isArray(parsed) ? parsed : (parsed.items || parsed.details || []);
-            var resultItems = [];
-
-            for (var i = 0; i < list.length; i++) {
-                var it = list[i];
-                var spec = cleanSpecString(it.nameAndSpec || it.spec || "");
-                if (spec) {
-                    resultItems.push({
-                        deliveryNo: it.deliveryNo || dNo,
-                        itemName: it.itemName || "胶袋",
-                        nameAndSpec: spec,
-                        unit: it.unit || "只",
-                        quantity: Number(it.quantity) || 0,
-                        unitPrice: Number(it.unitPrice) || 0,
-                        isPriceCertain: it.isPriceCertain !== false
-                    });
-                }
-            }
-            return resultItems;
+            return formatExtractedResult(parsed);
         }
 
-        // 批量识别入口
+        // 批量识别入口（自动分发至当前选定的接口）
         window.startProcess = async function() {
             if (appState.isProcessing || appState.files.length === 0) return;
             appState.isProcessing = true;
@@ -526,7 +658,10 @@
                 el('loadingMessage').textContent = '正在识别第 ' + (i + 1) + ' / ' + total + ' 张图片 (' + file.name + ')...';
                 try {
                     var imgData = await compressImage(file);
-                    var items = await callGeminiAPI(imgData.base64Data, imgData.mimeType, 0, 0);
+                    var items = appState.provider === "zhipu"
+                        ? await callZhipuAPI(imgData.base64Data, imgData.mimeType, 0)
+                        : await callGeminiAPI(imgData.base64Data, imgData.mimeType, 0, 0);
+
                     if (items.length > 0) {
                         for (var k = 0; k < items.length; k++) appState.extractedItems.push(items[k]);
                     } else {
@@ -627,9 +762,15 @@
                 badge.textContent = '✅ 脚本就绪';
                 badge.className = 'absolute right-0 top-0 text-xs px-2 py-1 rounded bg-green-100 text-green-700 font-medium';
             }
-            var saved = localStorage.getItem('GEMINI_API_KEY');
-            if (saved && saved.trim().length >= 15) {
-                appState.apiKey = saved.trim();
+            var activeProvider = localStorage.getItem('ACTIVE_AI_PROVIDER') || 'zhipu';
+            appState.provider = activeProvider;
+            el('providerSelectSetup').value = activeProvider;
+            el('providerSelectMain').value = activeProvider;
+            window.onSetupProviderChange(activeProvider);
+
+            var savedKey = localStorage.getItem(getStorageKeyName(activeProvider));
+            if (savedKey && savedKey.trim().length >= 15) {
+                appState.apiKey = savedKey.trim();
                 el('apiKeySection').classList.add('hidden');
                 el('mainContent').classList.remove('hidden');
             }
@@ -637,3 +778,5 @@
     </script>
 </body>
 </html>
+
+```
